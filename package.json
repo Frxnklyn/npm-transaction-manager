@@ -1,0 +1,35 @@
+{
+  "name": "@frxnklyn/transaction-manager",
+  "version": "0.1.0",
+  "description": "Shared updater and transaction primitives for coordinated commit and rollback workflows.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "npm run build"
+  },
+  "keywords": [
+    "typescript",
+    "transaction",
+    "updater",
+    "commit",
+    "rollback"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
