@@ -1,19 +1,63 @@
 import { Transaction } from "./transaction/Transaction.js";
-import type { TransactionParticipantInterface } from "./transaction/TransactionParticipantInterface.js";
+import type { TransactionParticipantInterface } from "./interfaces/TransactionParticipantInterface.js";
+import { TransactionState } from "./transaction/TransactionState.js";
 
+/** Creates transactions and runs callbacks with automatic submit or rollback. */
 export class TransactionManager {
+  /** Creates an empty transaction for manual use. */
   createTransaction(): Transaction {
     return new Transaction();
   }
 
-  async run(participants: readonly TransactionParticipantInterface[]): Promise<Transaction> {
+  /**
+   * Attaches participants, runs a callback, submits on success, and rolls back
+   * registered operations if the callback or submit fails.
+   */
+  async run<TResult>(
+    participants: readonly TransactionParticipantInterface[],
+    callback: (transaction: Transaction) => TResult | Promise<TResult>,
+  ): Promise<TResult> {
     const transaction = this.createTransaction();
 
-    for (const participant of participants) {
-      transaction.add(participant);
-    }
+    try {
+      for (const participant of participants) {
+        transaction.add(participant);
+      }
 
-    await transaction.commit();
-    return transaction;
+      const result = await callback(transaction);
+      await transaction.submit();
+
+      return result;
+    } catch (error) {
+      const state = transaction.getState();
+
+      if (state === TransactionState.Committed) {
+        try {
+          transaction.retryCleanup();
+        } catch (cleanupError) {
+          throw new AggregateError(
+            [error, cleanupError],
+            "Transaction committed, but cleanup and its retry both failed.",
+          );
+        }
+
+        throw error;
+      }
+
+      if (state !== TransactionState.Pending && state !== TransactionState.Failed) {
+        throw error;
+      }
+
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Transaction execution and rollback both failed.",
+        );
+      }
+
+      throw error;
+    }
   }
 }

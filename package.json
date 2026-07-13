@@ -17,8 +17,14 @@
     "LICENSE"
   ],
   "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "prebuild": "npm run clean",
     "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test",
     "prepare": "npm run build"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [
     "typescript",

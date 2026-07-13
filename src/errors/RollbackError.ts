@@ -1,13 +1,17 @@
-import type { TransactionEntry } from "../transaction/TransactionEntry.js";
-
+/** Reports one or more failures while reversing a transaction. */
 export class RollbackError extends Error {
+  /** Single cause or aggregate of all rollback failures. */
   readonly cause: unknown;
-  readonly entry: TransactionEntry;
+  /** All collected rollback and cleanup failures. */
+  readonly errors: readonly unknown[];
 
-  constructor(message: string, entry: TransactionEntry, cause: unknown) {
+  /** Creates a rollback error from the collected failures. */
+  constructor(message: string, errors: readonly unknown[]) {
     super(message);
     this.name = "RollbackError";
-    this.entry = entry;
-    this.cause = cause;
+    this.errors = [...errors];
+    this.cause = this.errors.length === 1
+      ? this.errors[0]
+      : new AggregateError(this.errors, message);
   }
 }
