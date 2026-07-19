@@ -3,7 +3,7 @@ import type { TransactionParticipantInterface } from "../interfaces/TransactionP
 import type { UpdaterInterface } from "../interfaces/UpdaterInterface.js";
 import { DisabledUpdater } from "../updater/DisabledUpdater.js";
 import { AbstractTransaction } from "./AbstractTransaction.js";
-import { PerParticipantTransactionCommitStrategy } from "./PerParticipantTransactionCommitStrategy.js";
+import { PerParticipantTransactionCommitStrategy } from "./CommitStrategies/PerParticipantTransactionCommitStrategy.js";
 
 /** Transaction that defers persistence through a temporary no-op updater. */
 export class Transaction extends AbstractTransaction {
