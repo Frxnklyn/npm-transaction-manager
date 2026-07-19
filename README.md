@@ -169,11 +169,83 @@ Die Änderung muss vor `register(operation)` erfolgreich abgeschlossen sein. Sch
 
 1. `add(participant)` speichert exakt dessen bisherigen Updater, setzt `DisabledUpdater` und übergibt den Transaction-Kontext.
 2. Participant-Methoden ändern ihren Zustand direkt und registrieren nur die zugehörige Rollback-Operation.
-3. `submit()` ruft die vorhandene `update()`-Methode jedes angehängten Participants nacheinander auf – auch ohne registrierte Operation.
-4. Während aller Updates bleibt im Participant der `DisabledUpdater` eingesetzt.
-5. Danach werden die Participants detached und exakt ihre vorherigen Updater-Instanzen wieder eingesetzt.
+3. `submit()` stellt für alle Teilnehmer zuerst die Original-Updater wieder her.
+4. Dann persistiert es nach der konfigurierten Strategy:
+   - `PerParticipantPersistStrategy` schreibt jeden Teilnehmer einmal.
+   - `PerOperationPersistStrategy` schreibt pro registrierter Operation in Reihenfolge.
+5. Schließlich werden die Participants detached und exakt ihre vorherigen Updater-Instanzen wieder eingesetzt.
 
 Ein konkreter Original-Updater muss für Submit zusätzlich eine Laufzeitmethode `update(): void | Promise<void>` besitzen. Das bestehende `UpdaterInterface` bleibt dabei unverändert. Fehlt diese Methode, schlägt Submit mit `CommitError` fehl.
+
+## Merkmale der neuen Commit-Sequenz
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Tx as Transaction
+    participant P as Participant (z.B. BankAccount)
+    participant D as DisabledUpdater
+    participant S as PersistStrategy
+    participant U as originalUpdater
+
+    Note over Tx: state = Pending
+
+    Client->>Tx: add(participant)
+    Tx->>P: getUpdater()
+    P-->>Tx: originalUpdater
+    Tx->>P: setUpdater(DisabledUpdater)
+    Tx->>P: attachTransaction(this)
+    Note over P: attachmentPhase = attached\nupdaterPhase = swapped
+
+    Client->>P: withdraw(50)
+    Note over P: updates internal state\n(e.g. balance -= 50)
+    P->>Tx: register(operation)
+    Note over Tx: operation.rollback() knows how to undo state
+    P->>D: getUpdater().update()
+    Note over D: No-Op – nothing is persisted
+
+    alt Client calls submit()
+        Client->>Tx: submit()
+        Note over Tx: state = Committing
+
+        loop per Binding
+            Tx->>P: setUpdater(originalUpdater)
+            Note over P: updaterPhase = original
+        end
+        Note over Tx: Updaters are restored before persistence
+
+        Tx->>S: persist(bindings, operations)
+
+        alt PerParticipantPersistStrategy
+            loop per Participant (once)
+                S->>P: getUpdater()
+                P-->>S: originalUpdater
+                S->>U: update()
+                Note over S: binding.persisted = true\nsubsequent hits for same participant are skipped
+            end
+        else PerOperationPersistStrategy
+            loop per Operation (in registration order)
+                S->>P: getUpdater()
+                P-->>S: originalUpdater
+                S->>U: update()
+                Note over S: same participant may persist multiple times
+            end
+        end
+
+        Note over Tx: state = Committed
+        Tx->>P: detachTransaction(this)
+        Note over P: attachmentPhase = detached
+    else Client calls rollback()
+        Client->>Tx: rollback()
+        Note over Tx: state = RollingBack
+        loop operations in reverse order
+            Tx->>Tx: operation.rollback()
+        end
+        Note over Tx: state = RolledBack
+        Tx->>P: detachTransaction(this)
+        Tx->>P: setUpdater(originalUpdater)
+    end
+```
 
 ## Rollback
 
