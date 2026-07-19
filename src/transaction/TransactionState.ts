@@ -7,9 +7,15 @@ export enum TransactionState {
   /** Submit completed successfully and cannot be rolled back. */
   Committed = "committed",
   /** The transaction is executing rollback operations. */
-  RollingBack = "rolling_back",
+  RollingBack = "rolling-back",
   /** Rollback completed successfully. */
-  RolledBack = "rolled_back",
-  /** Submit or rollback did not complete successfully. */
+  RolledBack = "rolled-back",
+  /** The transaction is ending tracking without commit or rollback. */
+  Stopping = "stopping",
+  /** Tracking ended while current in-memory changes were retained. */
+  Stopped = "stopped",
+  /** Persistence succeeded, but one or more participants remain attached. */
+  CommitCleanupFailed = "commit-cleanup-failed",
+  /** A lifecycle operation did not complete successfully. */
   Failed = "failed",
 }

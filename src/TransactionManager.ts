@@ -31,7 +31,7 @@ export class TransactionManager {
     } catch (error) {
       const state = transaction.getState();
 
-      if (state === TransactionState.Committed) {
+      if (state === TransactionState.CommitCleanupFailed) {
         try {
           transaction.retryCleanup();
         } catch (cleanupError) {
@@ -44,7 +44,7 @@ export class TransactionManager {
         throw error;
       }
 
-      if (state !== TransactionState.Pending && state !== TransactionState.Failed) {
+      if (state !== TransactionState.Pending) {
         throw error;
       }
 

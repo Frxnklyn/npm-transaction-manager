@@ -93,7 +93,7 @@ test("run() retries transient committed cleanup without rollback or persistence"
   assert.deepEqual(participant.values, ["persisted"]);
   assert.equal(originalUpdater.calls, 1);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionContext, null);
+  assert.equal(participant.transactionRegistrar, null);
   assert.equal(detachAttempts, 2);
 });
 
@@ -136,13 +136,16 @@ test("run() aggregates the initial and persistent committed cleanup failures", a
     },
   );
 
-  assert.equal(transactionFromCallback.getState(), TransactionState.Committed);
+  assert.equal(
+    transactionFromCallback.getState(),
+    TransactionState.CommitCleanupFailed,
+  );
   assert.equal(detachAttempts, 2);
   assert.equal(rollbackCalls, 0);
   assert.deepEqual(participant.values, ["persisted"]);
   assert.equal(originalUpdater.calls, 1);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.strictEqual(participant.transactionContext, transactionFromCallback);
+  assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
 });
 
 test("run() aggregates the callback and rollback failures without losing either", async () => {
@@ -169,7 +172,7 @@ test("run() aggregates the callback and rollback failures without losing either"
   );
 
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionContext, null);
+  assert.equal(participant.transactionRegistrar, null);
 });
 
 test("run() submits registered changes after the callback", async () => {
@@ -195,5 +198,5 @@ test("run() submits registered changes after the callback", async () => {
   assert.deepEqual(participant.values, ["delayed"]);
   assert.equal(originalUpdater.calls, 1);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionContext, null);
+  assert.equal(participant.transactionRegistrar, null);
 });

@@ -6,7 +6,7 @@ export class RecordingUpdater {
     this.onUpdate = onUpdate;
   }
 
-  async update() {
+  async recordUpdate() {
     this.calls += 1;
     await this.onUpdate?.();
   }
@@ -18,7 +18,7 @@ export class TestParticipant {
   constructor(updater, hooks = {}) {
     this.#updater = updater;
     this.hooks = hooks;
-    this.transactionContext = null;
+    this.transactionRegistrar = null;
     this.values = [];
     this.attachCalls = 0;
     this.detachCalls = 0;
@@ -37,29 +37,40 @@ export class TestParticipant {
     this.updaterAssignments.push(updater);
   }
 
-  attachTransaction(context) {
+  async update() {
+    if (
+      typeof this.#updater.shouldUpdate === "function"
+      && !this.#updater.shouldUpdate()
+    ) {
+      return;
+    }
+
+    await this.#updater.recordUpdate?.();
+  }
+
+  attachTransaction(transaction) {
     this.attachCalls += 1;
 
     if (
-      this.transactionContext !== null
-      && this.transactionContext !== context
+      this.transactionRegistrar !== null
+      && this.transactionRegistrar !== transaction
     ) {
       throw new Error("The fixture is already attached to another transaction.");
     }
 
-    this.transactionContext = context;
-    this.hooks.onAttach?.(context, this);
+    this.transactionRegistrar = transaction;
+    this.hooks.onAttach?.(transaction, this);
   }
 
-  detachTransaction(context) {
+  detachTransaction(transaction) {
     this.detachCalls += 1;
 
-    if (this.transactionContext !== context) {
-      throw new Error("The fixture was detached with an unexpected context.");
+    if (this.transactionRegistrar !== transaction) {
+      throw new Error("The fixture was detached with an unexpected registrar.");
     }
 
-    this.hooks.onDetach?.(context, this);
-    this.transactionContext = null;
+    this.hooks.onDetach?.(transaction, this);
+    this.transactionRegistrar = null;
   }
 
   async perform(name, apply, rollback) {
@@ -71,12 +82,12 @@ export class TestParticipant {
       rollback,
     );
 
-    if (this.transactionContext !== null) {
-      this.transactionContext.register(operation);
+    if (this.transactionRegistrar !== null) {
+      this.transactionRegistrar.registerOperation(operation);
       return;
     }
 
-    await this.#updater.update();
+    await this.update();
   }
 
   async append(

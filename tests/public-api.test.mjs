@@ -9,6 +9,8 @@ test("the package entry point exposes all concrete public APIs and error aliases
     "Transaction",
     "TransactionStateMachine",
     "TransactionOperation",
+    "PerParticipantTransactionCommitStrategy",
+    "PerOperationTransactionCommitStrategy",
     "Updater",
     "DisabledUpdater",
     "CommitError",
@@ -59,5 +61,6 @@ test("TransactionOperation contains rollback behavior only", () => {
   assert.equal(typeof operation.rollback, "function");
   assert.equal(typeof operation.execute, "undefined");
   assert.equal(typeof publicApi.Transaction.prototype.submit, "function");
-  assert.equal(typeof publicApi.Transaction.prototype.register, "function");
+  assert.equal(typeof publicApi.Transaction.prototype.registerOperation, "function");
+  assert.equal(typeof publicApi.Transaction.prototype.stop, "function");
 });

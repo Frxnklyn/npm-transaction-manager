@@ -3,11 +3,6 @@ import type { UpdaterInterface } from "../interfaces/UpdaterInterface.js";
 
 /** No-op updater installed while a participant is attached to a transaction. */
 export class DisabledUpdater implements UpdaterInterface {
-  /** Suppresses an optional concrete persistence hook. */
-  update(): void {
-    // Optional runtime persistence hook deliberately suppressed.
-  }
-
   /** Keeps automatic updates disabled. */
   enableAutoupdate(): this {
     return this;

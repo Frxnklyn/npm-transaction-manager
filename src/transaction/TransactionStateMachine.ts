@@ -1,12 +1,26 @@
 import { TransactionState } from "./TransactionState.js";
 
 const transitions: Record<TransactionState, readonly TransactionState[]> = {
-  [TransactionState.Pending]: [TransactionState.Committing, TransactionState.RollingBack, TransactionState.Failed],
-  [TransactionState.Committing]: [TransactionState.Committed, TransactionState.Failed],
+  [TransactionState.Pending]: [
+    TransactionState.Committing,
+    TransactionState.RollingBack,
+    TransactionState.Stopping,
+    TransactionState.Failed,
+  ],
+  [TransactionState.Committing]: [
+    TransactionState.Committed,
+    TransactionState.CommitCleanupFailed,
+    TransactionState.Failed,
+  ],
+  [TransactionState.CommitCleanupFailed]: [TransactionState.Committed],
   [TransactionState.Committed]: [],
   [TransactionState.RollingBack]: [TransactionState.RolledBack, TransactionState.Failed],
   [TransactionState.RolledBack]: [],
-  [TransactionState.Failed]: [TransactionState.RollingBack],
+  [TransactionState.Stopping]: [TransactionState.Stopped, TransactionState.Failed],
+  [TransactionState.Stopped]: [],
+  // A commit may have persisted an earlier participant before a later one
+  // failed. An in-memory rollback cannot safely reverse that external state.
+  [TransactionState.Failed]: [],
 };
 
 /** Validates and stores the lifecycle state of one transaction. */

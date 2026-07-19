@@ -26,7 +26,7 @@ test("add() captures the original updater for the eventual commit", async () => 
   await transaction.commit();
 
   assert.equal(originalUpdater.calls, 1);
-  assert.ok(updaterInstalledDuringCommit instanceof DisabledUpdater);
+  assert.strictEqual(updaterInstalledDuringCommit, originalUpdater);
 });
 
 test("add() installs a DisabledUpdater immediately", () => {
@@ -44,7 +44,7 @@ test("DisabledUpdater suppresses persistence without side effects", async () => 
   const transaction = new Transaction();
 
   transaction.add(participant);
-  await participant.getUpdater().update();
+  await participant.update();
 
   assert.equal(originalUpdater.calls, 0);
 
@@ -138,7 +138,7 @@ test("rollback executes successful operations in reverse order", async () => {
   assert.deepEqual(participant.values, []);
 });
 
-test("submit persists registered participants sequentially before restoring updaters", async () => {
+test("submit restores original updaters before persisting participants sequentially", async () => {
   const events = [];
   let firstParticipant;
   let secondParticipant;
@@ -156,8 +156,8 @@ test("submit persists registered participants sequentially before restoring upda
   await transaction.submit();
 
   assert.deepEqual(events, [
-    "update:first:DisabledUpdater",
-    "update:second:DisabledUpdater",
+    "update:first:RecordingUpdater",
+    "update:second:RecordingUpdater",
   ]);
   assert.strictEqual(firstParticipant.getUpdater(), firstUpdater);
   assert.strictEqual(secondParticipant.getUpdater(), secondUpdater);
@@ -183,7 +183,7 @@ test("a failed operation is not retained for rollback or marked dirty", async ()
   assert.equal(originalUpdater.calls, 0);
 });
 
-test("register() rejects an operation from an unattached participant", async () => {
+test("registerOperation() rejects an operation from an unattached participant", async () => {
   const attached = new TestParticipant(new RecordingUpdater());
   const unattached = new TestParticipant(new RecordingUpdater());
   const transaction = new Transaction();
@@ -191,14 +191,14 @@ test("register() rejects an operation from an unattached participant", async () 
   transaction.add(attached);
 
   assert.throws(
-    () => transaction.register(new TransactionOperation(
+    () => transaction.registerOperation(new TransactionOperation(
       "unattached-operation",
       unattached,
       () => {
         unattached.values.pop();
       },
     )),
-    /participant that is not attached/,
+    /unknown participant/,
   );
 
   assert.deepEqual(unattached.values, []);
@@ -225,17 +225,17 @@ test("adding the same participant twice is idempotent", async () => {
   assert.strictEqual(participant.getUpdater(), originalUpdater);
 });
 
-test("the transaction context is attached and removed during detach", async () => {
+test("the operation registrar is attached and removed during detach", async () => {
   const participant = new TestParticipant(new RecordingUpdater());
   const transaction = new Transaction();
 
   transaction.add(participant);
 
-  assert.strictEqual(participant.transactionContext, transaction);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
   assert.equal(participant.attachCalls, 1);
 
   await transaction.commit();
 
-  assert.equal(participant.transactionContext, null);
+  assert.equal(participant.transactionRegistrar, null);
   assert.equal(participant.detachCalls, 1);
 });
