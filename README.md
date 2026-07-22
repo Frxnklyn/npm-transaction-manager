@@ -194,6 +194,8 @@ await transaction.submit();
 Transaction befindet sich ab ihrer Erzeugung im Wartezustand `Pending`.
 `attach()` merkt Participants nur vor. `start()` wechselt nach `Initialized`, hängt die
 vorgemerkten Participants an und installiert die temporären Updater.
+Wird `attach()` während `Initialized` oder `Running` aufgerufen, wird der neue
+Participant sofort attached und erhält den festen `EnabledUpdater`.
 
 ## Temporärer Updater
 
@@ -238,7 +240,8 @@ damit ein späterer Fehler nur noch nicht persistierte Operationen für Rollback
   wechseln.
 - `detach()`: einen, mehrere oder alle Participants explizit von der Transaction
   lösen. Dabei läuft derselbe Cleanup-Pfad wie bei Setup-Fehlern: Original-Updater
-  restaurieren, Registrar detachen, keine erneute Persistierung.
+  restaurieren, Registrar detachen, keine erneute Persistierung. Participants mit
+  noch registrierten Operationen können nicht detached werden.
 
 Verwendete States:
 

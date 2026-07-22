@@ -68,6 +68,10 @@ export abstract class AbstractTransaction implements TransactionInterface, Trans
       };
 
       this.bindings.set(participant, binding);
+
+      if (this.isStarted()) {
+        this.activateBinding(binding);
+      }
     }
 
     return this;
@@ -277,6 +281,11 @@ export abstract class AbstractTransaction implements TransactionInterface, Trans
         continue;
       }
 
+      if (this.hasOperationsForParticipant(binding.participant)) {
+        errors.push(new Error(`Cannot detach participant while it has registered operations.`));
+        continue;
+      }
+
       errors.push(...this.cleanupBinding(binding));
     }
 
@@ -318,6 +327,16 @@ export abstract class AbstractTransaction implements TransactionInterface, Trans
   /** Verifies that a participant has a complete live binding. */
   private isBindingActive(binding: TransactionParticipantBinding): boolean {
     return !binding.detached && (binding.transactionUpdater === undefined || !binding.updaterRestored);
+  }
+
+  /** Checks whether newly attached participants should be activated immediately. */
+  private isStarted(): boolean {
+    return this.getState() === TransactionState.Initialized || this.getState() === TransactionState.Running;
+  }
+
+  /** Checks whether a participant still has undo work in this transaction. */
+  private hasOperationsForParticipant(participant: TransactionParticipantInterface): boolean {
+    return this.operations.some((operation) => operation.participant === participant);
   }
 
   /** Returns a single cause directly and aggregates multiple causes. */

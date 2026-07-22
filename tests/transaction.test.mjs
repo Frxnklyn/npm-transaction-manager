@@ -55,6 +55,20 @@ test("attach() only registers a participant and start() installs a DisabledUpdat
   assert.equal(participant.setUpdaterCalls, 1);
 });
 
+test("attach() activates new participants with EnabledUpdater while the transaction is started", () => {
+  const originalUpdater = new RecordingUpdater();
+  const participant = new TestParticipant(originalUpdater);
+  const transaction = new Transaction();
+
+  transaction.start();
+  transaction.attach(participant);
+
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.equal(participant.attachCalls, 1);
+  assert.equal(participant.setUpdaterCalls, 1);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+});
+
 test("DisabledUpdater suppresses persistence without side effects", async () => {
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);
@@ -303,6 +317,29 @@ test("registerOperation() rejects operations while the transaction state is not 
     )),
     /Cannot register operation "pending-operation" while the transaction is pending/,
   );
+});
+
+test("detach() rejects participants that still have registered operations", async () => {
+  const originalUpdater = new RecordingUpdater();
+  const participant = new TestParticipant(originalUpdater);
+  const transaction = new Transaction();
+
+  transaction.attach(participant);
+  transaction.start();
+  await participant.append("dirty");
+
+  assert.throws(
+    () => transaction.detach(participant),
+    /Cannot detach participant while it has registered operations/,
+  );
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
+
+  await transaction.rollback();
+  transaction.detach(participant);
+
+  assert.equal(participant.transactionRegistrar, null);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
 });
 
 test("attaching the same participant twice is idempotent", async () => {
