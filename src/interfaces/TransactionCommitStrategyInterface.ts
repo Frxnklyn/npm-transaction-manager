@@ -1,4 +1,5 @@
 import type { TransactionOperationInterface } from "./TransactionOperationInterface.js";
+import type { TransactionOperationCleanupInterface } from "./TransactionOperationCleanupInterface.js";
 import type { TransactionParticipantInterface } from "./TransactionParticipantInterface.js";
 
 /** Defines how tracked transaction changes are persisted during submit. */
@@ -10,5 +11,6 @@ export interface TransactionCommitStrategyInterface {
   commit(
     participants: readonly TransactionParticipantInterface[],
     operations: readonly TransactionOperationInterface[],
+    cleanup: TransactionOperationCleanupInterface,
   ): Promise<void>;
 }

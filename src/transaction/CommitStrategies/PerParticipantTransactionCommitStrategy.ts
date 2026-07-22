@@ -1,4 +1,5 @@
 import type { TransactionCommitStrategyInterface } from "../../interfaces/TransactionCommitStrategyInterface.js";
+import type { TransactionOperationCleanupInterface } from "../../interfaces/TransactionOperationCleanupInterface.js";
 import type { TransactionOperationInterface } from "../../interfaces/TransactionOperationInterface.js";
 import type { TransactionParticipantInterface } from "../../interfaces/TransactionParticipantInterface.js";
 
@@ -8,7 +9,8 @@ implements TransactionCommitStrategyInterface {
   /** Persists every unique participant's current state once. */
   async commit(
     participants: readonly TransactionParticipantInterface[],
-    _operations: readonly TransactionOperationInterface[],
+    operations: readonly TransactionOperationInterface[],
+    cleanup: TransactionOperationCleanupInterface,
   ): Promise<void> {
     const updatedParticipants = new Set<TransactionParticipantInterface>();
 
@@ -19,6 +21,12 @@ implements TransactionCommitStrategyInterface {
 
       updatedParticipants.add(participant);
       await participant.update();
+
+      for (const operation of operations) {
+        if (operation.participant === participant) {
+          cleanup.removeOperation(operation);
+        }
+      }
     }
   }
 }

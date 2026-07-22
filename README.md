@@ -18,6 +18,8 @@ Persistierung bis zu `submit()` auf.
   mit Participant, Diagnose-Name und Rollback-Funktion.
 - `TransactionCommitStrategyInterface` entscheidet, wie oft und in welcher
   Reihenfolge `participant.update()` während `submit()` aufgerufen wird.
+  Erfolgreich persistierte Operationen entfernt sie über
+  `TransactionOperationCleanupInterface`.
 
 ## Architektur
 
@@ -81,7 +83,12 @@ classDiagram
 
     class TransactionCommitStrategyInterface {
         <<interface>>
-        +commit(participants, operations) Promise~void~
+        +commit(participants, operations, cleanup) Promise~void~
+    }
+
+    class TransactionOperationCleanupInterface {
+        <<interface>>
+        +removeOperation(operation) void
     }
 
     class PerParticipantTransactionCommitStrategy
@@ -97,6 +104,7 @@ classDiagram
     AbstractTransaction o-- TransactionOperationInterface : undo log
     AbstractTransaction --> TransactionStateMachine : lifecycle
     AbstractTransaction --> TransactionCommitStrategyInterface : submit delegates
+    TransactionCommitStrategyInterface --> TransactionOperationCleanupInterface : removes persisted operations
     Transaction --> DisabledUpdater : installs after start()
     PerParticipantTransactionCommitStrategy ..|> TransactionCommitStrategyInterface
     PerOperationTransactionCommitStrategy ..|> TransactionCommitStrategyInterface
@@ -105,9 +113,9 @@ classDiagram
 
 Der Participant führt Änderungen sofort aus und registriert anschließend nur
 die Gegenoperation. Nach `start()` verhindert der `DisabledUpdater` während
-`Initialized` die automatische Persistierung. Bei `submit()` installiert
-`AbstractTransaction` zuerst den festen `EnabledUpdater` und übergibt danach an
-die gewählte Commit-Strategie.
+`Initialized` die automatische Persistierung. `submit()` und `rollback()` schalten
+vor ihrer Arbeit kurz auf den festen `EnabledUpdater` und setzen danach wieder den
+gestarteten Zustand mit `DisabledUpdater`.
 
 ## Verwendung
 
@@ -190,10 +198,11 @@ vorgemerkten Participants an und installiert die temporären Updater.
 
 `Transaction` installiert beim Start einen festen `DisabledUpdater`. Er meldet
 über den vorhandenen Updater-Vertrag, dass kein automatisches Update stattfinden
-soll. Persistenzlogik bleibt im Participant. Vor dem Commit wird ein fester
-`EnabledUpdater` installiert, weil die Transaction nicht wissen muss, welches
-Verhalten der ursprüngliche Updater intern hat. `stop()` und `rollback()` stellen
-den ursprünglichen Updater wieder her.
+soll. Persistenzlogik bleibt im Participant. Für `submit()` und `rollback()` wird
+kurz ein fester `EnabledUpdater` installiert, weil die Transaction nicht wissen
+muss, welches Verhalten der ursprüngliche Updater intern hat. Nach erfolgreichem
+`submit()` oder `rollback()` wird wieder der feste `DisabledUpdater` installiert.
+`stop()` stellt den ursprünglichen Updater wieder her.
 
 ## Commit-Strategien
 
@@ -204,16 +213,21 @@ den ursprünglichen Updater wieder her.
 
 Die Operationen werden beim Commit nie erneut ausgeführt. Beide Strategien
 erhalten eingefrorene Snapshots der Participant- und Operation-Arrays, nachdem
-alle Participants den festen `EnabledUpdater` erhalten haben.
+alle Participants den festen `EnabledUpdater` erhalten haben. Die Strategies
+entfernen erfolgreich persistierte Operationen über das Cleanup-Interface,
+damit ein späterer Fehler nur noch nicht persistierte Operationen für Rollback
+übrig lässt.
 
 ## Lifecycle
 
 - `submit()`: festen `EnabledUpdater` installieren, Commit-Strategie ausführen,
-  Participants attached lassen, kurz zu `Committed` wechseln und nach `Pending`
-  zurückkehren.
+  erledigte Operationen aus dem Undo-Log entfernen, Participants attached lassen,
+  kurz zu `Committed` wechseln, danach über `Pending` zurück nach `Initialized`
+  wechseln und den festen `DisabledUpdater` installieren.
 - `rollback()`: Operationen in umgekehrter Reihenfolge zurückrollen,
-  Original-Updater wiederherstellen, Participants attached lassen, kurz zu `RolledBack` wechseln
-  und nach `Pending` zurückkehren.
+  erfolgreich zurückgerollte Operationen aus dem Undo-Log entfernen, Participants
+  attached lassen, kurz zu `RolledBack` wechseln, danach über `Pending` zurück
+  nach `Initialized` wechseln und den festen `DisabledUpdater` installieren.
 - `stop()`: weder persistieren noch zurückrollen, sondern nur Original-Updater
   wiederherstellen, Participants attached lassen, kurz zu `Stopped` wechseln und nach `Pending`
   zurückkehren. Der Speicherzustand bleibt erhalten.

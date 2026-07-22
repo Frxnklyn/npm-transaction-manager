@@ -25,9 +25,15 @@ const transitions: Record<TransactionState, readonly TransactionState[]> = {
     TransactionState.Committed,
     TransactionState.Failed,
   ],
-  [TransactionState.Committed]: [TransactionState.Pending],
+  [TransactionState.Committed]: [
+    TransactionState.Pending,
+    TransactionState.Initialized,
+  ],
   [TransactionState.RollingBack]: [TransactionState.RolledBack, TransactionState.Failed],
-  [TransactionState.RolledBack]: [TransactionState.Pending],
+  [TransactionState.RolledBack]: [
+    TransactionState.Pending,
+    TransactionState.Initialized,
+  ],
   [TransactionState.Stopping]: [TransactionState.Stopped, TransactionState.Failed],
   [TransactionState.Stopped]: [TransactionState.Pending],
   [TransactionState.Failed]: [

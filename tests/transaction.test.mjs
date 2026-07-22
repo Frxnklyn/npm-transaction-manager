@@ -34,7 +34,7 @@ test("start() captures the original updater for the eventual commit", async () =
   assert.equal(participant.updateCalls, 1);
   assert.ok(updaterInstalledDuringCommit instanceof EnabledUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
 });
 
 test("attach() only registers a participant and start() installs a DisabledUpdater", () => {
@@ -133,7 +133,7 @@ test("submit updates an attached participant even without operations", async () 
   assert.equal(originalUpdater.calls, 0);
 });
 
-test("commit leaves participants with the fixed enabled updater", async () => {
+test("commit returns participants to the fixed disabled updater", async () => {
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
@@ -143,12 +143,12 @@ test("commit leaves participants with the fixed enabled updater", async () => {
   await participant.append("first");
   await transaction.commit();
 
-  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.equal(transaction.getState(), TransactionState.Pending);
+  assert.equal(transaction.getState(), TransactionState.Initialized);
 });
 
-test("rollback restores the exact original updater instance", async () => {
+test("rollback returns participants to the fixed disabled updater", async () => {
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
@@ -158,9 +158,9 @@ test("rollback restores the exact original updater instance", async () => {
   await participant.append("first");
   await transaction.rollback();
 
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.equal(transaction.getState(), TransactionState.Pending);
+  assert.equal(transaction.getState(), TransactionState.Initialized);
 });
 
 test("rollback executes successful operations in reverse order", async () => {
@@ -213,8 +213,34 @@ test("submit installs EnabledUpdater before persisting participants sequentially
   assert.equal(secondUpdater.calls, 0);
   assert.equal(firstParticipant.updateCalls, 1);
   assert.equal(secondParticipant.updateCalls, 1);
-  assert.ok(firstParticipant.getUpdater() instanceof EnabledUpdater);
-  assert.ok(secondParticipant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(firstParticipant.getUpdater() instanceof DisabledUpdater);
+  assert.ok(secondParticipant.getUpdater() instanceof DisabledUpdater);
+});
+
+test("submit disables updaters after the committed state", async () => {
+  const assignments = [];
+  let transaction;
+  const participant = new TestParticipant(new RecordingUpdater(), {
+    onSetUpdater(updater) {
+      if (transaction !== undefined) {
+        assignments.push(`${transaction.getState()}:${updater.constructor.name}`);
+      }
+    },
+  });
+  transaction = new Transaction();
+
+  transaction.attach(participant);
+  transaction.start();
+  assignments.length = 0;
+  await participant.append("first");
+  await transaction.submit();
+
+  assert.deepEqual(assignments, [
+    "committing:EnabledUpdater",
+    "initialized:DisabledUpdater",
+  ]);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
+  assert.equal(transaction.getState(), TransactionState.Initialized);
 });
 
 test("a failed operation is not retained for rollback or marked dirty", async () => {
@@ -282,8 +308,8 @@ test("attaching the same participant twice is idempotent", async () => {
   await transaction.rollback();
 
   assert.equal(participant.detachCalls, 0);
-  assert.equal(participant.setUpdaterCalls, 2);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(participant.setUpdaterCalls, 3);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
 
   transaction.detach();
   assert.equal(participant.detachCalls, 1);

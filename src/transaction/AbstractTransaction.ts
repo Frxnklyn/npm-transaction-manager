@@ -2,6 +2,7 @@ import { CommitError } from "../errors/CommitError.js";
 import { RollbackError } from "../errors/RollbackError.js";
 import type { TransactionCommitStrategyInterface } from "../interfaces/TransactionCommitStrategyInterface.js";
 import type { TransactionInterface } from "../interfaces/TransactionInterface.js";
+import type { TransactionOperationCleanupInterface } from "../interfaces/TransactionOperationCleanupInterface.js";
 import type { TransactionOperationInterface } from "../interfaces/TransactionOperationInterface.js";
 import type { TransactionParticipantInterface } from "../interfaces/TransactionParticipantInterface.js";
 import { DisabledUpdater } from "../updater/DisabledUpdater.js";
@@ -11,7 +12,7 @@ import { TransactionState } from "./TransactionState.js";
 import { TransactionStateMachine } from "./TransactionStateMachine.js";
 
 /** Manages the shared participant, undo-log, and lifecycle behavior. */
-export abstract class AbstractTransaction implements TransactionInterface {
+export abstract class AbstractTransaction implements TransactionInterface, TransactionOperationCleanupInterface {
   /** Fixed updater for phases where participant autoupdate must be suppressed. */
   protected readonly disabledUpdater = new DisabledUpdater();
 
@@ -74,12 +75,14 @@ export abstract class AbstractTransaction implements TransactionInterface {
 
   /** Attaches one added participant and optionally installs a transaction updater. */
   private activateBinding(binding: TransactionParticipantBinding): void {
-    binding.originalUpdater = binding.participant.getUpdater();
     binding.transactionUpdater = this.disabledUpdater;
 
     try {
-      binding.detached = false;
-      binding.participant.attachTransaction(this);
+      if (binding.detached) {
+        binding.originalUpdater = binding.participant.getUpdater();
+        binding.detached = false;
+        binding.participant.attachTransaction(this);
+      }
 
       if (binding.transactionUpdater !== undefined) {
         binding.updaterRestored = false;
@@ -110,60 +113,62 @@ export abstract class AbstractTransaction implements TransactionInterface {
     this.operations.push(operation);
   }
 
-  /** Enables updates and commits while keeping participants attached. */
+  /** Enables updates for commit, then returns participants to the started state. */
   async submit(): Promise<void> {
     this.stateMachine.transitionTo(TransactionState.Committing);
-    const restoreErrors: unknown[] = [];
+    const setupErrors = this.enableUpdaters();
 
-    for (const binding of this.bindings.values()) {
-      try {
-        binding.participant.setUpdater(this.enabledUpdater);
-        binding.updaterRestored = false;
-      } catch (error) {
-        restoreErrors.push(error);
-      }
-    }
-
-    if (restoreErrors.length > 0) {
-      this.failCommit(restoreErrors, "Transaction submit setup failed.");
+    if (setupErrors.length > 0) {
+      this.failCommit(setupErrors, "Transaction submit setup failed.");
     }
 
     const participants = Object.freeze([...this.bindings.keys()]);
     const operations = Object.freeze([...this.operations]);
 
     try {
-      await this.commitStrategy.commit(participants, operations);
+      await this.commitStrategy.commit(participants, operations, this);
     } catch (error) {
       this.failCommit([error], "Transaction submit failed.");
     }
 
-    this.operations.length = 0;
+    for (const operation of operations) {
+      this.removeOperation(operation);
+    }
+
     this.stateMachine.transitionTo(TransactionState.Committed);
-    this.stateMachine.transitionTo(TransactionState.Pending);
+    this.start();
   }
 
-  /** Executes undo operations in strict reverse registration order. */
+  /** Enables updates for rollback, then returns participants to the started state. */
   async rollback(): Promise<void> {
     this.stateMachine.transitionTo(TransactionState.RollingBack);
     const errors: unknown[] = [];
+    errors.push(...this.enableUpdaters());
 
-    for (let index = this.operations.length - 1; index >= 0; index -= 1) {
+    if (errors.length > 0) {
+      this.stateMachine.transitionTo(TransactionState.Failed);
+      throw new RollbackError("Transaction rollback setup failed.", errors);
+    }
+
+    const operations = [...this.operations];
+
+    for (let index = operations.length - 1; index >= 0; index -= 1) {
+      const operation = operations[index];
+
       try {
-        await this.operations[index].rollback();
+        await operation.rollback();
+        this.removeOperation(operation);
       } catch (error) {
         errors.push(error);
       }
     }
-
-    errors.push(...this.restoreUpdaters());
-    this.operations.length = 0;
 
     if (errors.length > 0) {
       this.stateMachine.transitionTo(TransactionState.Failed);
       throw new RollbackError("Transaction rollback failed.", errors);
     }
     this.stateMachine.transitionTo(TransactionState.RolledBack);
-    this.stateMachine.transitionTo(TransactionState.Pending);
+    this.start();
   }
 
   /** Restores original updaters while discarding persistence and undo work. */
@@ -181,9 +186,7 @@ export abstract class AbstractTransaction implements TransactionInterface {
   }
 
   /** Detaches participants explicitly through the shared binding cleanup path. */
-  detach(
-    participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[],
-  ): void {
+  detach(participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[]): void {
     const errors = this.detachParticipants(participants);
 
     if (errors.length > 0) {
@@ -194,9 +197,33 @@ export abstract class AbstractTransaction implements TransactionInterface {
   /** Marks commit failure, performs best-effort cleanup, and throws. */
   private failCommit(initialErrors: readonly unknown[], message: string): never {
     const errors = [...initialErrors];
-    this.operations.length = 0;
     this.stateMachine.transitionTo(TransactionState.Failed);
     throw new CommitError(message, this.toCause(errors, message));
+  }
+
+  /** Switches every active participant to the fixed enabled updater. */
+  private enableUpdaters(): unknown[] {
+    const errors: unknown[] = [];
+
+    for (const binding of this.bindings.values()) {
+      try {
+        binding.participant.setUpdater(this.enabledUpdater);
+        binding.updaterRestored = false;
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+
+    return errors;
+  }
+
+  /** Removes an operation if it is still tracked by this transaction. */
+  public removeOperation(operation: TransactionOperationInterface): void {
+    const index = this.operations.indexOf(operation);
+
+    if (index >= 0) {
+      this.operations.splice(index, 1);
+    }
   }
 
   /** Restores every updater that was replaced by the transaction. */
@@ -223,13 +250,9 @@ export abstract class AbstractTransaction implements TransactionInterface {
   }
 
   /** Cleans selected bindings through the same restore and detach path. */
-  private detachParticipants(
-    participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[],
-  ): unknown[] {
+  private detachParticipants(participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[]): unknown[] {
     const errors: unknown[] = [];
-    const participantSet = participants === undefined
-      ? undefined
-      : new Set(Array.isArray(participants) ? participants : [participants]);
+    const participantSet = participants === undefined ? undefined : new Set(Array.isArray(participants) ? participants : [participants]);
 
     for (const binding of this.bindings.values()) {
       if (participantSet !== undefined && !participantSet.has(binding.participant)) {

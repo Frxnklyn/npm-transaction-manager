@@ -15,14 +15,14 @@ test("each transaction owns independent state", async () => {
   committed.start();
   await committed.commit();
 
-  assert.equal(committed.getState(), TransactionState.Pending);
+  assert.equal(committed.getState(), TransactionState.Initialized);
   assert.equal(pending.getState(), TransactionState.Pending);
 
   pending.start();
   await pending.rollback();
 
-  assert.equal(committed.getState(), TransactionState.Pending);
-  assert.equal(pending.getState(), TransactionState.Pending);
+  assert.equal(committed.getState(), TransactionState.Initialized);
+  assert.equal(pending.getState(), TransactionState.Initialized);
 });
 
 test("successful completion states return to pending", () => {

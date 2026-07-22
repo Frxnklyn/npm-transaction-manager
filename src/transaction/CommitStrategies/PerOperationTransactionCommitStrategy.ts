@@ -1,4 +1,5 @@
 import type { TransactionCommitStrategyInterface } from "../../interfaces/TransactionCommitStrategyInterface.js";
+import type { TransactionOperationCleanupInterface } from "../../interfaces/TransactionOperationCleanupInterface.js";
 import type { TransactionOperationInterface } from "../../interfaces/TransactionOperationInterface.js";
 import type { TransactionParticipantInterface } from "../../interfaces/TransactionParticipantInterface.js";
 
@@ -9,9 +10,11 @@ implements TransactionCommitStrategyInterface {
   async commit(
     _participants: readonly TransactionParticipantInterface[],
     operations: readonly TransactionOperationInterface[],
+    cleanup: TransactionOperationCleanupInterface,
   ): Promise<void> {
     for (const operation of operations) {
       await operation.participant.update();
+      cleanup.removeOperation(operation);
     }
   }
 }

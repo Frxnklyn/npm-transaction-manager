@@ -4,6 +4,7 @@ export type { TransactionCommitStrategyInterface } from "./interfaces/Transactio
 export type { TransactionInterface } from "./interfaces/TransactionInterface.js";
 export { TransactionOperation, type TransactionRollbackFunction } from "./transaction/TransactionOperation.js";
 export type { TransactionOperationInterface } from "./interfaces/TransactionOperationInterface.js";
+export type { TransactionOperationCleanupInterface } from "./interfaces/TransactionOperationCleanupInterface.js";
 export type { TransactionOperationRegistrarInterface } from "./interfaces/TransactionOperationRegistrarInterface.js";
 export type { TransactionParticipantInterface } from "./interfaces/TransactionParticipantInterface.js";
 export * from "./transaction/AbstractTransaction.js";

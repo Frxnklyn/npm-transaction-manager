@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CommitError,
+  DisabledUpdater,
   EnabledUpdater,
   RollbackError,
   TransactionManager,
@@ -30,9 +31,9 @@ test("run() rolls back successful operations after a callback error", async () =
   );
 
   assert.deepEqual(participant.values, []);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
+  assert.equal(transactionFromCallback.getState(), TransactionState.Initialized);
   assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
 });
 
@@ -50,7 +51,7 @@ test("run() returns the callback result after committing", async () => {
   assert.strictEqual(result, expectedResult);
   assert.equal(participant.updateCalls, 1);
   assert.equal(originalUpdater.calls, 0);
-  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.notEqual(participant.transactionRegistrar, null);
 });
 
@@ -75,12 +76,12 @@ test("run() leaves committed participants attached for explicit detach", async (
     );
   });
 
-  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
+  assert.equal(transactionFromCallback.getState(), TransactionState.Initialized);
   assert.equal(rollbackCalls, 0);
   assert.deepEqual(participant.values, ["persisted"]);
   assert.equal(participant.updateCalls, 1);
   assert.equal(originalUpdater.calls, 0);
-  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
 
   transactionFromCallback.detach();
@@ -116,7 +117,7 @@ test("run() leaves explicit detach failures to the caller", async () => {
     );
   });
 
-  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
+  assert.equal(transactionFromCallback.getState(), TransactionState.Initialized);
   assert.throws(
     () => transactionFromCallback.detach(),
     (error) => error === detachError,
@@ -153,7 +154,7 @@ test("run() aggregates the callback and rollback failures without losing either"
     },
   );
 
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
   assert.notEqual(participant.transactionRegistrar, null);
 });
 
@@ -180,6 +181,6 @@ test("run() submits registered changes after the callback", async () => {
   assert.deepEqual(participant.values, ["delayed"]);
   assert.equal(participant.updateCalls, 1);
   assert.equal(originalUpdater.calls, 0);
-  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.notEqual(participant.transactionRegistrar, null);
 });
