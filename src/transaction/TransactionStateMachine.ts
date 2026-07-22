@@ -2,6 +2,19 @@ import { TransactionState } from "./TransactionState.js";
 
 const transitions: Record<TransactionState, readonly TransactionState[]> = {
   [TransactionState.Pending]: [
+    TransactionState.Initialized,
+    TransactionState.Failed,
+  ],
+  [TransactionState.Initialized]: [
+    TransactionState.Pending,
+    TransactionState.Running,
+    TransactionState.Committing,
+    TransactionState.RollingBack,
+    TransactionState.Stopping,
+    TransactionState.Failed,
+  ],
+  [TransactionState.Running]: [
+    TransactionState.Initialized,
     TransactionState.Committing,
     TransactionState.RollingBack,
     TransactionState.Stopping,
@@ -13,11 +26,11 @@ const transitions: Record<TransactionState, readonly TransactionState[]> = {
     TransactionState.Failed,
   ],
   [TransactionState.CommitCleanupFailed]: [TransactionState.Committed],
-  [TransactionState.Committed]: [],
+  [TransactionState.Committed]: [TransactionState.Pending],
   [TransactionState.RollingBack]: [TransactionState.RolledBack, TransactionState.Failed],
-  [TransactionState.RolledBack]: [],
+  [TransactionState.RolledBack]: [TransactionState.Pending],
   [TransactionState.Stopping]: [TransactionState.Stopped, TransactionState.Failed],
-  [TransactionState.Stopped]: [],
+  [TransactionState.Stopped]: [TransactionState.Pending],
   // A commit may have persisted an earlier participant before a later one
   // failed. An in-memory rollback cannot safely reverse that external state.
   [TransactionState.Failed]: [],

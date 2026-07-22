@@ -12,48 +12,49 @@ test("each transaction owns independent state", async () => {
   const committed = manager.createTransaction();
   const pending = manager.createTransaction();
 
+  committed.start();
   await committed.commit();
 
-  assert.equal(committed.getState(), TransactionState.Committed);
+  assert.equal(committed.getState(), TransactionState.Pending);
   assert.equal(pending.getState(), TransactionState.Pending);
 
+  pending.start();
   await pending.rollback();
 
-  assert.equal(committed.getState(), TransactionState.Committed);
-  assert.equal(pending.getState(), TransactionState.RolledBack);
+  assert.equal(committed.getState(), TransactionState.Pending);
+  assert.equal(pending.getState(), TransactionState.Pending);
 });
 
-test("successful completion states are terminal", () => {
+test("successful completion states return to pending", () => {
   const committed = new TransactionStateMachine();
+  committed.transitionTo(TransactionState.Initialized);
   committed.transitionTo(TransactionState.Committing);
   committed.transitionTo(TransactionState.Committed);
+  assert.equal(committed.canTransitionTo(TransactionState.Pending), true);
+  committed.transitionTo(TransactionState.Pending);
 
   const rolledBack = new TransactionStateMachine();
+  rolledBack.transitionTo(TransactionState.Initialized);
   rolledBack.transitionTo(TransactionState.RollingBack);
   rolledBack.transitionTo(TransactionState.RolledBack);
+  assert.equal(rolledBack.canTransitionTo(TransactionState.Pending), true);
+  rolledBack.transitionTo(TransactionState.Pending);
 
   const stopped = new TransactionStateMachine();
+  stopped.transitionTo(TransactionState.Initialized);
   stopped.transitionTo(TransactionState.Stopping);
   stopped.transitionTo(TransactionState.Stopped);
+  assert.equal(stopped.canTransitionTo(TransactionState.Pending), true);
+  stopped.transitionTo(TransactionState.Pending);
 
-  for (const state of Object.values(TransactionState)) {
-    assert.equal(committed.canTransitionTo(state), false);
-    assert.equal(rolledBack.canTransitionTo(state), false);
-    assert.equal(stopped.canTransitionTo(state), false);
-  }
-
-  assert.throws(
-    () => committed.transitionTo(TransactionState.RollingBack),
-    /Invalid transaction transition/,
-  );
-  assert.throws(
-    () => rolledBack.transitionTo(TransactionState.Committing),
-    /Invalid transaction transition/,
-  );
+  assert.equal(committed.getState(), TransactionState.Pending);
+  assert.equal(rolledBack.getState(), TransactionState.Pending);
+  assert.equal(stopped.getState(), TransactionState.Pending);
 });
 
 test("commit cleanup can only finish as committed", () => {
   const stateMachine = new TransactionStateMachine();
+  stateMachine.transitionTo(TransactionState.Initialized);
   stateMachine.transitionTo(TransactionState.Committing);
   stateMachine.transitionTo(TransactionState.CommitCleanupFailed);
 
@@ -63,6 +64,14 @@ test("commit cleanup can only finish as committed", () => {
     stateMachine.transitionTo(TransactionState.Committed),
     TransactionState.Committed,
   );
+});
+
+test("running work can return to initialized before completion", () => {
+  const stateMachine = new TransactionStateMachine();
+
+  stateMachine.transitionTo(TransactionState.Initialized);
+  stateMachine.transitionTo(TransactionState.Running);
+  assert.equal(stateMachine.transitionTo(TransactionState.Initialized), TransactionState.Initialized);
 });
 
 test("Failed is terminal because commit persistence may be partial", () => {

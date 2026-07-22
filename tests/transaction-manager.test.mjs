@@ -31,7 +31,7 @@ test("run() rolls back successful operations after a callback error", async () =
   assert.deepEqual(participant.values, []);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.equal(transactionFromCallback.getState(), TransactionState.RolledBack);
+  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
 });
 
 test("run() returns the callback result after committing", async () => {
@@ -88,7 +88,7 @@ test("run() retries transient committed cleanup without rollback or persistence"
     },
   );
 
-  assert.equal(transactionFromCallback.getState(), TransactionState.Committed);
+  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
   assert.equal(rollbackCalls, 0);
   assert.deepEqual(participant.values, ["persisted"]);
   assert.equal(originalUpdater.calls, 1);

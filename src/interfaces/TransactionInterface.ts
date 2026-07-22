@@ -7,14 +7,14 @@ export interface TransactionInterface extends TransactionOperationRegistrarInter
   /** Returns the current lifecycle state. */
   getState(): TransactionState;
 
-  /** Starts tracking one or more participants in the default pending state. */
+  /** Starts tracking added participants in the default pending state. */
   start(
-    participants:
+    participants?:
       | TransactionParticipantInterface
       | readonly TransactionParticipantInterface[],
   ): void;
 
-  /** Attaches a participant to the transaction. */
+  /** Adds a participant to the transaction setup. */
   add(participant: TransactionParticipantInterface): this;
 
   /** Persists the tracked changes using the configured commit strategy. */

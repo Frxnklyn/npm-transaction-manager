@@ -24,6 +24,7 @@ export class TransactionManager {
         transaction.add(participant);
       }
 
+      transaction.start();
       const result = await callback(transaction);
       await transaction.submit();
 
@@ -44,7 +45,10 @@ export class TransactionManager {
         throw error;
       }
 
-      if (state !== TransactionState.Pending) {
+      if (
+        state !== TransactionState.Initialized
+        && state !== TransactionState.Running
+      ) {
         throw error;
       }
 

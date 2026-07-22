@@ -22,6 +22,7 @@ test("a commit failure still restores the original updater and detaches the regi
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("dirty");
 
   await assert.rejects(transaction.commit(), (error) => {
@@ -42,6 +43,7 @@ test("a rollback failure still restores the original updater and detaches the re
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("dirty", { rollbackError: operationRollbackError });
 
   await assert.rejects(transaction.rollback(), (error) => {
@@ -70,6 +72,7 @@ test("commit aggregates persistence and detach failures while restoring the upda
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("dirty");
 
   await assert.rejects(transaction.commit(), (error) => {
@@ -97,6 +100,7 @@ test("rollback attempts every reversal and aggregates rollback plus detach failu
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first", {
     events,
     rollbackError: firstRollbackError,
@@ -135,8 +139,9 @@ test("an attach failure detaches a partial registrar and restores the updater", 
   });
   const transaction = new Transaction();
 
+  transaction.add(participant);
   assert.throws(
-    () => transaction.add(participant),
+    () => transaction.start(),
     (error) => error === attachError,
   );
 
@@ -161,7 +166,8 @@ test("an attach failure aggregates detach cleanup without replacing the updater"
   });
   const transaction = new Transaction();
 
-  assert.throws(() => transaction.add(participant), (error) => {
+  transaction.add(participant);
+  assert.throws(() => transaction.start(), (error) => {
     assert.ok(error instanceof AggregateError);
     assert.deepEqual(error.errors, [attachError, detachError]);
     return true;
@@ -184,8 +190,9 @@ test("a temporary updater installation failure restores and detaches the partici
   });
   const transaction = new Transaction();
 
+  transaction.add(participant);
   assert.throws(
-    () => transaction.add(participant),
+    () => transaction.start(),
     (error) => error === updaterError,
   );
 
@@ -212,6 +219,7 @@ test("retryCleanup() resolves a transient cleanup failure without new persistenc
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("dirty");
 
   await assert.rejects(transaction.commit(), (error) => {
@@ -228,7 +236,7 @@ test("retryCleanup() resolves a transient cleanup failure without new persistenc
 
   transaction.retryCleanup();
 
-  assert.equal(transaction.getState(), TransactionState.Committed);
+  assert.equal(transaction.getState(), TransactionState.Pending);
   assert.equal(detachAttempts, 2);
   assert.equal(participant.transactionRegistrar, null);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
@@ -237,7 +245,7 @@ test("retryCleanup() resolves a transient cleanup failure without new persistenc
 
   assert.throws(
     () => transaction.retryCleanup(),
-    /Cannot retry commit cleanup while the transaction is committed/,
+    /Cannot retry commit cleanup while the transaction is pending/,
   );
   assert.equal(detachAttempts, 2);
 });
@@ -251,11 +259,12 @@ test("retryCleanup() is rejected before commit and after rollback", async () => 
   );
 
   const rolledBack = new Transaction();
+  rolledBack.start();
   await rolledBack.rollback();
 
   assert.throws(
     () => rolledBack.retryCleanup(),
-    /Cannot retry commit cleanup while the transaction is rolled-back/,
+    /Cannot retry commit cleanup while the transaction is pending/,
   );
 });
 
@@ -275,6 +284,7 @@ test("rollback cleanup failure is terminal", async () => {
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
 
   await assert.rejects(transaction.rollback(), (error) => {
     assert.ok(error instanceof RollbackError);
@@ -303,6 +313,7 @@ test("a failed rollback cannot replay successful reversals", async () => {
   let secondRollbackCalls = 0;
 
   transaction.add(participant);
+  transaction.start();
   await participant.perform(
     "first",
     () => {

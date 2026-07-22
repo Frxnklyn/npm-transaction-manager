@@ -6,9 +6,9 @@ export interface TransactionParticipantBinding {
   /** Participant managed by the transaction. */
   readonly participant: TransactionParticipantInterface;
   /** Exact updater instance installed before the transaction started. */
-  readonly originalUpdater: UpdaterInterface;
+  originalUpdater: UpdaterInterface | undefined;
   /** Optional updater installed while persistence is deferred. */
-  readonly transactionUpdater: UpdaterInterface | undefined;
+  transactionUpdater: UpdaterInterface | undefined;
   /** Whether the original updater is currently installed. */
   updaterRestored: boolean;
   /** Whether the operation registrar is currently detached. */

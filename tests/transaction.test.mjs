@@ -12,7 +12,7 @@ import {
   TestParticipant,
 } from "./fixtures/TestParticipant.mjs";
 
-test("add() captures the original updater for the eventual commit", async () => {
+test("start() captures the original updater for the eventual commit", async () => {
   let updaterInstalledDuringCommit;
   let participant;
   const originalUpdater = new RecordingUpdater(() => {
@@ -22,6 +22,7 @@ test("add() captures the original updater for the eventual commit", async () => 
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first");
   await transaction.commit();
 
@@ -29,13 +30,22 @@ test("add() captures the original updater for the eventual commit", async () => 
   assert.strictEqual(updaterInstalledDuringCommit, originalUpdater);
 });
 
-test("add() installs a DisabledUpdater immediately", () => {
-  const participant = new TestParticipant(new RecordingUpdater());
+test("add() only registers a participant and start() installs a DisabledUpdater", () => {
+  const originalUpdater = new RecordingUpdater();
+  const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
 
   transaction.add(participant);
 
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(participant.attachCalls, 0);
+  assert.equal(participant.setUpdaterCalls, 0);
+
+  transaction.start();
+
   assert.ok(participant.getUpdater() instanceof DisabledUpdater);
+  assert.equal(participant.attachCalls, 1);
+  assert.equal(participant.setUpdaterCalls, 1);
 });
 
 test("DisabledUpdater suppresses persistence without side effects", async () => {
@@ -44,6 +54,7 @@ test("DisabledUpdater suppresses persistence without side effects", async () => 
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.update();
 
   assert.equal(originalUpdater.calls, 0);
@@ -57,6 +68,7 @@ test("normal operations do not call the original updater while pending", async (
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first");
   await participant.append("second");
 
@@ -72,6 +84,7 @@ test("commit updates a dirty participant exactly once for several operations", a
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first");
   await participant.append("second");
   await participant.append("third");
@@ -87,6 +100,7 @@ test("submit updates an attached participant even without operations", async () 
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await transaction.submit();
 
   assert.equal(originalUpdater.calls, 1);
@@ -98,11 +112,12 @@ test("commit restores the exact original updater instance", async () => {
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first");
   await transaction.commit();
 
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(transaction.getState(), TransactionState.Committed);
+  assert.equal(transaction.getState(), TransactionState.Pending);
 });
 
 test("rollback restores the exact original updater instance", async () => {
@@ -111,12 +126,13 @@ test("rollback restores the exact original updater instance", async () => {
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("first");
   await transaction.rollback();
 
   assert.strictEqual(participant.getUpdater(), originalUpdater);
   assert.equal(originalUpdater.calls, 0);
-  assert.equal(transaction.getState(), TransactionState.RolledBack);
+  assert.equal(transaction.getState(), TransactionState.Pending);
 });
 
 test("rollback executes successful operations in reverse order", async () => {
@@ -125,6 +141,7 @@ test("rollback executes successful operations in reverse order", async () => {
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("parent", { events });
   await participant.append("child", { events });
   await transaction.rollback();
@@ -153,6 +170,7 @@ test("submit restores original updaters before persisting participants sequentia
   const transaction = new Transaction();
 
   transaction.add(firstParticipant).add(secondParticipant);
+  transaction.start();
   await transaction.submit();
 
   assert.deepEqual(events, [
@@ -171,6 +189,7 @@ test("a failed operation is not retained for rollback or marked dirty", async ()
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
 
   await assert.rejects(
     participant.append("failed", { events, executeError }),
@@ -189,6 +208,7 @@ test("registerOperation() rejects an operation from an unattached participant", 
   const transaction = new Transaction();
 
   transaction.add(attached);
+  transaction.start();
 
   assert.throws(
     () => transaction.registerOperation(new TransactionOperation(
@@ -211,10 +231,15 @@ test("adding the same participant twice is idempotent", async () => {
   const transaction = new Transaction();
 
   assert.strictEqual(transaction.add(participant), transaction);
-  const disabledUpdater = participant.getUpdater();
   assert.strictEqual(transaction.add(participant), transaction);
 
-  assert.strictEqual(participant.getUpdater(), disabledUpdater);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(participant.attachCalls, 0);
+  assert.equal(participant.setUpdaterCalls, 0);
+
+  transaction.start();
+
+  assert.ok(participant.getUpdater() instanceof DisabledUpdater);
   assert.equal(participant.attachCalls, 1);
   assert.equal(participant.setUpdaterCalls, 1);
 
@@ -230,6 +255,7 @@ test("the operation registrar is attached and removed during detach", async () =
   const transaction = new Transaction();
 
   transaction.add(participant);
+  transaction.start();
 
   assert.strictEqual(participant.transactionRegistrar, transaction);
   assert.equal(participant.attachCalls, 1);

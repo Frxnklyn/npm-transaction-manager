@@ -1,7 +1,6 @@
 import type { TransactionCommitStrategyInterface } from "../interfaces/TransactionCommitStrategyInterface.js";
 import type { TransactionParticipantInterface } from "../interfaces/TransactionParticipantInterface.js";
 import type { UpdaterInterface } from "../interfaces/UpdaterInterface.js";
-import { DisabledUpdater } from "../updater/DisabledUpdater.js";
 import { AbstractTransaction } from "./AbstractTransaction.js";
 import { PerParticipantTransactionCommitStrategy } from "./CommitStrategies/PerParticipantTransactionCommitStrategy.js";
 
@@ -19,7 +18,7 @@ export class Transaction extends AbstractTransaction {
   protected override createTransactionUpdater(
     _participant: TransactionParticipantInterface,
   ): UpdaterInterface {
-    return new DisabledUpdater();
+    return this.disabledUpdater;
   }
 
   /** Backwards-compatible alias for {@link submit}. */

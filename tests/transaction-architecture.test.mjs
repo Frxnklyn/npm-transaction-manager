@@ -14,7 +14,7 @@ import {
   TestParticipant,
 } from "./fixtures/TestParticipant.mjs";
 
-test("start() tracks one participant or an array in the default pending state", async () => {
+test("start() activates one participant or an array in the default pending state", async () => {
   const first = new TestParticipant(new RecordingUpdater());
   const second = new TestParticipant(new RecordingUpdater());
   const singleTransaction = new Transaction();
@@ -23,12 +23,13 @@ test("start() tracks one participant or an array in the default pending state", 
   assert.equal(singleTransaction.getState(), TransactionState.Pending);
   singleTransaction.start(first);
   assert.strictEqual(first.transactionRegistrar, singleTransaction);
+  assert.equal(singleTransaction.getState(), TransactionState.Initialized);
   await singleTransaction.stop();
 
   arrayTransaction.start([first, second]);
   assert.strictEqual(first.transactionRegistrar, arrayTransaction);
   assert.strictEqual(second.transactionRegistrar, arrayTransaction);
-  assert.equal(arrayTransaction.getState(), TransactionState.Pending);
+  assert.equal(arrayTransaction.getState(), TransactionState.Initialized);
 
   await arrayTransaction.stop();
 });
@@ -46,8 +47,9 @@ test("operation registration is rejected until attach and updater setup complete
   });
   const transaction = new Transaction();
 
+  transaction.add(participant);
   assert.throws(
-    () => transaction.add(participant),
+    () => transaction.start(),
     /unknown participant/,
   );
   assert.equal(transaction.getState(), TransactionState.Pending);
@@ -112,6 +114,7 @@ test("commit strategy receives frozen snapshots after original updaters are rest
   const transaction = new Transaction(strategy);
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("tracked");
   await transaction.submit();
 
@@ -128,6 +131,7 @@ test("rollback never invokes the commit strategy", async () => {
   const participant = new TestParticipant(new RecordingUpdater());
 
   transaction.add(participant);
+  transaction.start();
   await participant.append("temporary");
   await transaction.rollback();
 
@@ -147,6 +151,7 @@ test("stop retains memory state without persistence or rollback", async () => {
   });
 
   transaction.add(participant);
+  transaction.start();
   await participant.perform(
     "retain",
     () => participant.values.push("retained"),
@@ -157,7 +162,7 @@ test("stop retains memory state without persistence or rollback", async () => {
   );
   await transaction.stop();
 
-  assert.equal(transaction.getState(), TransactionState.Stopped);
+  assert.equal(transaction.getState(), TransactionState.Pending);
   assert.equal(commitCalls, 0);
   assert.equal(rollbackCalls, 0);
   assert.equal(updater.calls, 0);

@@ -33,7 +33,7 @@ classDiagram
     class TransactionInterface {
         <<interface>>
         +getState() TransactionState
-        +start(participants) void
+        +start(participants?) void
         +add(participant) this
         +submit() Promise~void~
         +rollback() Promise~void~
@@ -99,15 +99,16 @@ classDiagram
     AbstractTransaction o-- TransactionOperationInterface : undo log
     AbstractTransaction --> TransactionStateMachine : lifecycle
     AbstractTransaction --> TransactionCommitStrategyInterface : submit delegates
-    Transaction --> DisabledUpdater : installs while Pending
+    Transaction --> DisabledUpdater : installs after start()
     PerParticipantTransactionCommitStrategy ..|> TransactionCommitStrategyInterface
     PerOperationTransactionCommitStrategy ..|> TransactionCommitStrategyInterface
     TransactionCommitStrategyInterface --> TransactionParticipantInterface : calls update()
 ```
 
 Der Participant führt Änderungen sofort aus und registriert anschließend nur
-die Gegenoperation. Während `Pending` verhindert der `DisabledUpdater` die
-automatische Persistierung. Bei `submit()` stellt `AbstractTransaction` zuerst
+die Gegenoperation. Nach `start()` verhindert der `DisabledUpdater` während
+`Initialized` die automatische Persistierung. Bei `submit()` stellt
+`AbstractTransaction` zuerst
 die Original-Updater wieder her und übergibt danach an die gewählte
 Commit-Strategie.
 
@@ -176,19 +177,21 @@ class Participant implements TransactionParticipantInterface {
 }
 
 const transaction = new Transaction();
-transaction.start([participantA, participantB]);
+transaction.add(participantA).add(participantB);
+transaction.start();
 
 await participantA.setValue("next");
 await transaction.submit();
 ```
 
 `start()` akzeptiert einen einzelnen Participant oder ein readonly Array. Die
-Transaction befindet sich bereits ab ihrer Erzeugung im aktiven Sammelzustand
-`Pending`; `start()` hängt daher nur die übergebenen Participants an.
+Transaction befindet sich ab ihrer Erzeugung im Wartezustand `Pending`.
+`add()` merkt Participants nur vor. `start()` wechselt nach `Initialized`, hängt die
+vorgemerkten Participants an und installiert die temporären Updater.
 
 ## Temporärer Updater
 
-`Transaction` installiert während `Pending` einen `DisabledUpdater`. Er meldet
+`Transaction` installiert beim Start einen `DisabledUpdater`. Er meldet
 über den vorhandenen Updater-Vertrag, dass kein automatisches Update stattfinden
 soll. Persistenzlogik bleibt im Participant. Vor dem Commit wird exakt die zuvor
 installierte Updater-Instanz wiederhergestellt.
@@ -207,21 +210,28 @@ alle Original-Updater wiederhergestellt wurden.
 ## Lifecycle
 
 - `submit()`: Original-Updater wiederherstellen, Commit-Strategie ausführen,
-  Participants detachen und zu `Committed` wechseln.
+  Participants detachen, kurz zu `Committed` wechseln und nach `Pending`
+  zurückkehren.
 - `rollback()`: Operationen in umgekehrter Reihenfolge zurückrollen,
-  Original-Updater wiederherstellen, detachen und zu `RolledBack` wechseln.
+  Original-Updater wiederherstellen, detachen, kurz zu `RolledBack` wechseln
+  und nach `Pending` zurückkehren.
 - `stop()`: weder persistieren noch zurückrollen, sondern nur Original-Updater
-  wiederherstellen, detachen und zu `Stopped` wechseln. Der Speicherzustand
-  bleibt erhalten.
+  wiederherstellen, detachen, kurz zu `Stopped` wechseln und nach `Pending`
+  zurückkehren. Der Speicherzustand bleibt erhalten.
 
 Verwendete States:
 
 ```text
-Pending
+Pending -> Initialized
+Initialized -> Running | Committing | RollingBack | Stopping | Failed
+Running -> Initialized | Committing | RollingBack | Stopping | Failed
 Committing -> Committed | CommitCleanupFailed | Failed
+Committed -> Pending
 RollingBack -> RolledBack | Failed
+RolledBack -> Pending
 Stopping -> Stopped | Failed
-CommitCleanupFailed -> Committed
+Stopped -> Pending
+CommitCleanupFailed -> Committed -> Pending
 ```
 
 `retryCleanup()` ist ausschließlich in `CommitCleanupFailed` erlaubt und führt
