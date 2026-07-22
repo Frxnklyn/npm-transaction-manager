@@ -7,7 +7,7 @@ export type { TransactionOperationInterface } from "./interfaces/TransactionOper
 export type { TransactionOperationRegistrarInterface } from "./interfaces/TransactionOperationRegistrarInterface.js";
 export type { TransactionParticipantInterface } from "./interfaces/TransactionParticipantInterface.js";
 export * from "./transaction/AbstractTransaction.js";
-export * from "./transaction/PerOperationTransactionCommitStrategy.js";
+export * from "./transaction/CommitStrategies/PerOperationTransactionCommitStrategy.js";
 export * from "./transaction/CommitStrategies/PerParticipantTransactionCommitStrategy.js";
 export * from "./transaction/TransactionState.js";
 export * from "./transaction/Transaction.js";

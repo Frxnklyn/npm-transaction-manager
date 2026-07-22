@@ -1,6 +1,6 @@
-import type { TransactionCommitStrategyInterface } from "../interfaces/TransactionCommitStrategyInterface.js";
-import type { TransactionOperationInterface } from "../interfaces/TransactionOperationInterface.js";
-import type { TransactionParticipantInterface } from "../interfaces/TransactionParticipantInterface.js";
+import type { TransactionCommitStrategyInterface } from "../../interfaces/TransactionCommitStrategyInterface.js";
+import type { TransactionOperationInterface } from "../../interfaces/TransactionOperationInterface.js";
+import type { TransactionParticipantInterface } from "../../interfaces/TransactionParticipantInterface.js";
 
 /** Persists once per operation, in operation registration order. */
 export class PerOperationTransactionCommitStrategy
