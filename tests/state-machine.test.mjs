@@ -52,6 +52,14 @@ test("successful completion states return to pending", () => {
   assert.equal(stopped.getState(), TransactionState.Pending);
 });
 
+test("pause returns directly to pending", () => {
+  const stateMachine = new TransactionStateMachine();
+
+  stateMachine.transitionTo(TransactionState.Initialized);
+  stateMachine.transitionTo(TransactionState.Pausing);
+  assert.equal(stateMachine.transitionTo(TransactionState.Pending), TransactionState.Pending);
+});
+
 test("running work can return to initialized before completion", () => {
   const stateMachine = new TransactionStateMachine();
 
@@ -67,6 +75,8 @@ test("Failed can recover to pending or retry rollback", () => {
 
   assert.equal(stateMachine.canTransitionTo(TransactionState.Pending), true);
   assert.equal(stateMachine.canTransitionTo(TransactionState.RollingBack), true);
+  assert.equal(stateMachine.canTransitionTo(TransactionState.Stopping), true);
+  assert.equal(stateMachine.canTransitionTo(TransactionState.Pausing), true);
   assert.equal(stateMachine.canTransitionTo(TransactionState.Committing), false);
   assert.equal(stateMachine.canTransitionTo(TransactionState.Initialized), false);
 

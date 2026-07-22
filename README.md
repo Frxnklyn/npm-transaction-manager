@@ -40,6 +40,7 @@ classDiagram
         +submit() Promise~void~
         +rollback() Promise~void~
         +stop() Promise~void~
+        +pause() Promise~void~
         +detach(participants?) void
     }
 
@@ -228,9 +229,13 @@ damit ein späterer Fehler nur noch nicht persistierte Operationen für Rollback
   erfolgreich zurückgerollte Operationen aus dem Undo-Log entfernen, Participants
   attached lassen, kurz zu `RolledBack` wechseln, danach über `Pending` zurück
   nach `Initialized` wechseln und den festen `DisabledUpdater` installieren.
-- `stop()`: weder persistieren noch zurückrollen, sondern nur Original-Updater
-  wiederherstellen, Participants attached lassen, kurz zu `Stopped` wechseln und nach `Pending`
-  zurückkehren. Der Speicherzustand bleibt erhalten.
+- `stop()`: weder persistieren noch zurückrollen, sondern Original-Updater
+  wiederherstellen, alle offenen Operationen verwerfen, Participants attached
+  lassen, kurz zu `Stopped` wechseln und nach `Pending` zurückkehren. Der
+  Speicherzustand bleibt erhalten.
+- `pause()`: wie `stop()`, aber ohne `Stopped`-Zwischenzustand: Original-Updater
+  wiederherstellen, alle offenen Operationen verwerfen und nach `Pending`
+  wechseln.
 - `detach()`: einen, mehrere oder alle Participants explizit von der Transaction
   lösen. Dabei läuft derselbe Cleanup-Pfad wie bei Setup-Fehlern: Original-Updater
   restaurieren, Registrar detachen, keine erneute Persistierung.
@@ -239,15 +244,16 @@ Verwendete States:
 
 ```text
 Pending -> Initialized
-Initialized -> Running | Committing | RollingBack | Stopping | Failed
-Running -> Running | Initialized | Committing | RollingBack | Stopping | Failed
+Initialized -> Running | Committing | RollingBack | Stopping | Pausing | Failed
+Running -> Running | Initialized | Committing | RollingBack | Stopping | Pausing | Failed
 Committing -> Committed | Failed
-Committed -> Pending
+Committed -> Pending | Initialized
 RollingBack -> RolledBack | Failed
-RolledBack -> Pending
+RolledBack -> Pending | Initialized
 Stopping -> Stopped | Failed
 Stopped -> Pending
-Failed -> Pending | RollingBack
+Pausing -> Pending | Failed
+Failed -> Pending | RollingBack | Stopping | Pausing
 ```
 
 `Failed` kann für manuelle Fehlerbehandlung zurück nach `Pending` geführt werden

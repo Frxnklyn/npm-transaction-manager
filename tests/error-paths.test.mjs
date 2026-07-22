@@ -89,6 +89,47 @@ test("commit reports persistence failure while leaving updates enabled", async (
   assert.equal(originalUpdater.calls, 0);
 });
 
+test("stop after failure restores updaters and clears remaining operations", async () => {
+  const persistenceError = new Error("persistence failed");
+  const originalUpdater = new RecordingUpdater();
+  const participant = new TestParticipant(originalUpdater, {
+    onUpdate() {
+      throw persistenceError;
+    },
+  });
+  const transaction = new Transaction();
+  let rollbackCalls = 0;
+
+  transaction.attach(participant);
+  transaction.start();
+  await participant.perform(
+    "dirty",
+    () => participant.values.push("dirty"),
+    () => {
+      rollbackCalls += 1;
+      participant.values.pop();
+    },
+  );
+
+  await assert.rejects(transaction.commit(), (error) => {
+    assert.ok(error instanceof CommitError);
+    assert.strictEqual(error.cause, persistenceError);
+    return true;
+  });
+
+  await transaction.stop();
+
+  assert.equal(transaction.getState(), TransactionState.Pending);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.deepEqual(participant.values, ["dirty"]);
+
+  await assert.rejects(
+    transaction.rollback(),
+    /Invalid transaction transition from pending to rolling-back/,
+  );
+  assert.equal(rollbackCalls, 0);
+});
+
 test("commit strategies can remove persisted operations before a later failure", async () => {
   const persistenceError = new Error("second persistence failed");
   const participant = new TestParticipant(new RecordingUpdater());

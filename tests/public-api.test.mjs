@@ -82,6 +82,7 @@ test("TransactionOperation contains rollback behavior only", () => {
   assert.equal(typeof publicApi.Transaction.prototype.submit, "function");
   assert.equal(typeof publicApi.Transaction.prototype.registerOperation, "function");
   assert.equal(typeof publicApi.Transaction.prototype.stop, "function");
+  assert.equal(typeof publicApi.Transaction.prototype.pause, "function");
   assert.equal(typeof publicApi.Transaction.prototype.attach, "function");
   assert.equal(typeof publicApi.Transaction.prototype.detach, "function");
   assert.equal(typeof publicApi.Transaction.prototype.add, "undefined");

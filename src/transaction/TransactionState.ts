@@ -8,16 +8,18 @@ export enum TransactionState {
   Running = "running",
   /** The transaction is enabling and persisting participants. */
   Committing = "committing",
-  /** Submit completed successfully before the transaction returns to pending. */
+  /** Submit completed successfully before the transaction resets. */
   Committed = "committed",
   /** The transaction is executing rollback operations. */
   RollingBack = "rolling-back",
-  /** Rollback completed successfully before the transaction returns to pending. */
+  /** Rollback completed successfully before the transaction resets. */
   RolledBack = "rolled-back",
   /** The transaction is ending tracking without commit or rollback. */
   Stopping = "stopping",
   /** Tracking ended before the transaction returns to pending. */
   Stopped = "stopped",
+  /** The transaction is pausing active tracking without detaching participants. */
+  Pausing = "pausing",
   /** A lifecycle operation did not complete successfully. */
   Failed = "failed",
 }

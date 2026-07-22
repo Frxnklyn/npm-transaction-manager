@@ -188,6 +188,37 @@ test("stop retains memory state without persistence or rollback", async () => {
   assert.equal(participant.transactionRegistrar, null);
 });
 
+test("pause restores original updaters, clears operations, and returns to pending", async () => {
+  const updater = new RecordingUpdater();
+  const participant = new TestParticipant(updater);
+  let rollbackCalls = 0;
+  const transaction = new Transaction();
+
+  transaction.attach(participant);
+  transaction.start();
+  await participant.perform(
+    "pause",
+    () => participant.values.push("paused"),
+    () => {
+      rollbackCalls += 1;
+      participant.values.pop();
+    },
+  );
+  await transaction.pause();
+
+  assert.equal(transaction.getState(), TransactionState.Pending);
+  assert.equal(rollbackCalls, 0);
+  assert.deepEqual(participant.values, ["paused"]);
+  assert.strictEqual(participant.getUpdater(), updater);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+
+  await assert.rejects(
+    transaction.rollback(),
+    /Invalid transaction transition from pending to rolling-back/,
+  );
+  assert.equal(rollbackCalls, 0);
+});
+
 test("TransactionContextInterface file and source references are removed", () => {
   const sourceRoot = join(process.cwd(), "src");
   const removedFile = join(

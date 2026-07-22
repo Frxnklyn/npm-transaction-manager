@@ -287,6 +287,24 @@ test("registerOperation() rejects an operation from an unattached participant", 
   await transaction.rollback();
 });
 
+test("registerOperation() rejects operations while the transaction state is not active", async () => {
+  const participant = new TestParticipant(new RecordingUpdater());
+  const transaction = new Transaction();
+
+  transaction.attach(participant);
+  transaction.start();
+  await transaction.pause();
+
+  assert.throws(
+    () => transaction.registerOperation(new TransactionOperation(
+      "pending-operation",
+      participant,
+      () => undefined,
+    )),
+    /Cannot register operation "pending-operation" while the transaction is pending/,
+  );
+});
+
 test("attaching the same participant twice is idempotent", async () => {
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);

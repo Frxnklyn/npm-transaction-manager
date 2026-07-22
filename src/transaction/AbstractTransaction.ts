@@ -103,6 +103,10 @@ export abstract class AbstractTransaction implements TransactionInterface, Trans
 
   /** Registers an already-applied operation in registration order. */
   registerOperation(operation: TransactionOperationInterface): void {
+    if (!this.stateMachine.canTransitionTo(TransactionState.Running)) {
+      throw new Error(`Cannot register operation "${operation.name}" while the transaction is ${this.getState()}.`);
+    }
+
     const binding = this.bindings.get(operation.participant);
 
     if (binding === undefined || !this.isBindingActive(binding)) {
@@ -182,6 +186,20 @@ export abstract class AbstractTransaction implements TransactionInterface, Trans
       throw this.toCause(errors, "Transaction stop cleanup failed.");
     }
     this.stateMachine.transitionTo(TransactionState.Stopped);
+    this.stateMachine.transitionTo(TransactionState.Pending);
+  }
+
+  /** Restores original updaters and returns to pending while discarding undo work. */
+  async pause(): Promise<void> {
+    this.stateMachine.transitionTo(TransactionState.Pausing);
+    const errors = this.restoreUpdaters();
+    this.operations.length = 0;
+
+    if (errors.length > 0) {
+      this.stateMachine.transitionTo(TransactionState.Failed);
+      throw this.toCause(errors, "Transaction pause cleanup failed.");
+    }
+
     this.stateMachine.transitionTo(TransactionState.Pending);
   }
 

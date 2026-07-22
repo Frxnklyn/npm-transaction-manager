@@ -30,6 +30,9 @@ export interface TransactionInterface extends TransactionOperationRegistrarInter
   /** Ends tracking without persisting or rolling back in-memory changes. */
   stop(): Promise<void>;
 
+  /** Pauses tracking without persisting or rolling back in-memory changes. */
+  pause(): Promise<void>;
+
   /** Restores and detaches one or more participants. */
   detach(
     participants?:
