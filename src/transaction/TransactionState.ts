@@ -6,7 +6,7 @@ export enum TransactionState {
   Initialized = "initialized",
   /** The transaction is currently applying participant work. */
   Running = "running",
-  /** The transaction is persisting original updaters. */
+  /** The transaction is enabling and persisting participants. */
   Committing = "committing",
   /** Submit completed successfully before the transaction returns to pending. */
   Committed = "committed",
@@ -18,8 +18,6 @@ export enum TransactionState {
   Stopping = "stopping",
   /** Tracking ended before the transaction returns to pending. */
   Stopped = "stopped",
-  /** Persistence succeeded, but one or more participants remain attached. */
-  CommitCleanupFailed = "commit-cleanup-failed",
   /** A lifecycle operation did not complete successfully. */
   Failed = "failed",
 }

@@ -21,7 +21,7 @@ export class TransactionManager {
 
     try {
       for (const participant of participants) {
-        transaction.add(participant);
+        transaction.attach(participant);
       }
 
       transaction.start();
@@ -31,19 +31,6 @@ export class TransactionManager {
       return result;
     } catch (error) {
       const state = transaction.getState();
-
-      if (state === TransactionState.CommitCleanupFailed) {
-        try {
-          transaction.retryCleanup();
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            "Transaction committed, but cleanup and its retry both failed.",
-          );
-        }
-
-        throw error;
-      }
 
       if (
         state !== TransactionState.Initialized

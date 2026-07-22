@@ -5,7 +5,7 @@ import type { TransactionParticipantInterface } from "../../interfaces/Transacti
 /** Persists once per operation, in operation registration order. */
 export class PerOperationTransactionCommitStrategy
 implements TransactionCommitStrategyInterface {
-  /** Calls the owning participant's restored updater for every operation. */
+  /** Calls the owning participant's update hook for every operation. */
   async commit(
     _participants: readonly TransactionParticipantInterface[],
     operations: readonly TransactionOperationInterface[],

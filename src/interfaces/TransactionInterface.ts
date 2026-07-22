@@ -7,15 +7,19 @@ export interface TransactionInterface extends TransactionOperationRegistrarInter
   /** Returns the current lifecycle state. */
   getState(): TransactionState;
 
-  /** Starts tracking added participants in the default pending state. */
+  /** Starts tracking attached participants in the default pending state. */
   start(
     participants?:
       | TransactionParticipantInterface
       | readonly TransactionParticipantInterface[],
   ): void;
 
-  /** Adds a participant to the transaction setup. */
-  add(participant: TransactionParticipantInterface): this;
+  /** Registers one or more participants for activation on start. */
+  attach(
+    participants:
+      | TransactionParticipantInterface
+      | readonly TransactionParticipantInterface[],
+  ): this;
 
   /** Persists the tracked changes using the configured commit strategy. */
   submit(): Promise<void>;
@@ -26,6 +30,10 @@ export interface TransactionInterface extends TransactionOperationRegistrarInter
   /** Ends tracking without persisting or rolling back in-memory changes. */
   stop(): Promise<void>;
 
-  /** Retries remaining cleanup after persistence completed successfully. */
-  retryCleanup(): void;
+  /** Restores and detaches one or more participants. */
+  detach(
+    participants?:
+      | TransactionParticipantInterface
+      | readonly TransactionParticipantInterface[],
+  ): void;
 }

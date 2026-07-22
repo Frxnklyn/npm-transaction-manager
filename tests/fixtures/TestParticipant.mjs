@@ -23,6 +23,7 @@ export class TestParticipant {
     this.attachCalls = 0;
     this.detachCalls = 0;
     this.setUpdaterCalls = 0;
+    this.updateCalls = 0;
     this.updaterAssignments = [];
   }
 
@@ -45,6 +46,8 @@ export class TestParticipant {
       return;
     }
 
+    this.updateCalls += 1;
+    await this.hooks.onUpdate?.(this);
     await this.#updater.recordUpdate?.();
   }
 

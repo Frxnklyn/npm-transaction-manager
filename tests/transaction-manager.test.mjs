@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   CommitError,
+  EnabledUpdater,
   RollbackError,
   TransactionManager,
   TransactionState,
@@ -32,6 +33,7 @@ test("run() rolls back successful operations after a callback error", async () =
   assert.strictEqual(participant.getUpdater(), originalUpdater);
   assert.equal(originalUpdater.calls, 0);
   assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
+  assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
 });
 
 test("run() returns the callback result after committing", async () => {
@@ -46,58 +48,47 @@ test("run() returns the callback result after committing", async () => {
   });
 
   assert.strictEqual(result, expectedResult);
-  assert.equal(originalUpdater.calls, 1);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.notEqual(participant.transactionRegistrar, null);
 });
 
-test("run() retries transient committed cleanup without rollback or persistence", async () => {
-  const detachError = new Error("detach failed once");
+test("run() leaves committed participants attached for explicit detach", async () => {
   const originalUpdater = new RecordingUpdater();
-  let detachAttempts = 0;
-  const participant = new TestParticipant(originalUpdater, {
-    onDetach() {
-      detachAttempts += 1;
-
-      if (detachAttempts === 1) {
-        throw detachError;
-      }
-    },
-  });
+  const participant = new TestParticipant(originalUpdater);
   const manager = new TransactionManager();
   let transactionFromCallback;
   let rollbackCalls = 0;
 
-  await assert.rejects(
-    manager.run([participant], async (transaction) => {
-      transactionFromCallback = transaction;
-      await participant.perform(
-        "persisted",
-        () => {
-          participant.values.push("persisted");
-        },
-        () => {
-          rollbackCalls += 1;
-          participant.values.pop();
-        },
-      );
-    }),
-    (error) => {
-      assert.ok(error instanceof CommitError);
-      assert.strictEqual(error.cause, detachError);
-      return true;
-    },
-  );
+  await manager.run([participant], async (transaction) => {
+    transactionFromCallback = transaction;
+    await participant.perform(
+      "persisted",
+      () => {
+        participant.values.push("persisted");
+      },
+      () => {
+        rollbackCalls += 1;
+        participant.values.pop();
+      },
+    );
+  });
 
   assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
   assert.equal(rollbackCalls, 0);
   assert.deepEqual(participant.values, ["persisted"]);
-  assert.equal(originalUpdater.calls, 1);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
+
+  transactionFromCallback.detach();
   assert.equal(participant.transactionRegistrar, null);
-  assert.equal(detachAttempts, 2);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
 });
 
-test("run() aggregates the initial and persistent committed cleanup failures", async () => {
+test("run() leaves explicit detach failures to the caller", async () => {
   const detachError = new Error("detach always fails");
   const originalUpdater = new RecordingUpdater();
   let detachAttempts = 0;
@@ -111,39 +102,30 @@ test("run() aggregates the initial and persistent committed cleanup failures", a
   let transactionFromCallback;
   let rollbackCalls = 0;
 
-  await assert.rejects(
-    manager.run([participant], async (transaction) => {
-      transactionFromCallback = transaction;
-      await participant.perform(
-        "persisted",
-        () => {
-          participant.values.push("persisted");
-        },
-        () => {
-          rollbackCalls += 1;
-          participant.values.pop();
-        },
-      );
-    }),
-    (error) => {
-      assert.ok(error instanceof AggregateError);
-      assert.equal(error.errors.length, 2);
-      assert.ok(error.errors[0] instanceof CommitError);
-      assert.strictEqual(error.errors[0].cause, detachError);
-      assert.ok(error.errors[1] instanceof CommitError);
-      assert.strictEqual(error.errors[1].cause, detachError);
-      return true;
-    },
-  );
+  await manager.run([participant], async (transaction) => {
+    transactionFromCallback = transaction;
+    await participant.perform(
+      "persisted",
+      () => {
+        participant.values.push("persisted");
+      },
+      () => {
+        rollbackCalls += 1;
+        participant.values.pop();
+      },
+    );
+  });
 
-  assert.equal(
-    transactionFromCallback.getState(),
-    TransactionState.CommitCleanupFailed,
+  assert.equal(transactionFromCallback.getState(), TransactionState.Pending);
+  assert.throws(
+    () => transactionFromCallback.detach(),
+    (error) => error === detachError,
   );
-  assert.equal(detachAttempts, 2);
+  assert.equal(detachAttempts, 1);
   assert.equal(rollbackCalls, 0);
   assert.deepEqual(participant.values, ["persisted"]);
-  assert.equal(originalUpdater.calls, 1);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
   assert.strictEqual(participant.transactionRegistrar, transactionFromCallback);
 });
@@ -172,7 +154,7 @@ test("run() aggregates the callback and rollback failures without losing either"
   );
 
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionRegistrar, null);
+  assert.notEqual(participant.transactionRegistrar, null);
 });
 
 test("run() submits registered changes after the callback", async () => {
@@ -196,7 +178,8 @@ test("run() submits registered changes after the callback", async () => {
 
   assert.equal(result, "committed");
   assert.deepEqual(participant.values, ["delayed"]);
-  assert.equal(originalUpdater.calls, 1);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionRegistrar, null);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.notEqual(participant.transactionRegistrar, null);
 });

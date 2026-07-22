@@ -4,8 +4,8 @@ import type { TransactionParticipantInterface } from "./TransactionParticipantIn
 /** Defines how tracked transaction changes are persisted during submit. */
 export interface TransactionCommitStrategyInterface {
   /**
-   * Persists the participants' current state after their original updaters
-   * have been restored.
+   * Persists the participants' current state after the transaction enabled
+   * updates through its fixed updater.
    */
   commit(
     participants: readonly TransactionParticipantInterface[],

@@ -14,6 +14,7 @@ const transitions: Record<TransactionState, readonly TransactionState[]> = {
     TransactionState.Failed,
   ],
   [TransactionState.Running]: [
+    TransactionState.Running,
     TransactionState.Initialized,
     TransactionState.Committing,
     TransactionState.RollingBack,
@@ -22,18 +23,17 @@ const transitions: Record<TransactionState, readonly TransactionState[]> = {
   ],
   [TransactionState.Committing]: [
     TransactionState.Committed,
-    TransactionState.CommitCleanupFailed,
     TransactionState.Failed,
   ],
-  [TransactionState.CommitCleanupFailed]: [TransactionState.Committed],
   [TransactionState.Committed]: [TransactionState.Pending],
   [TransactionState.RollingBack]: [TransactionState.RolledBack, TransactionState.Failed],
   [TransactionState.RolledBack]: [TransactionState.Pending],
   [TransactionState.Stopping]: [TransactionState.Stopped, TransactionState.Failed],
   [TransactionState.Stopped]: [TransactionState.Pending],
-  // A commit may have persisted an earlier participant before a later one
-  // failed. An in-memory rollback cannot safely reverse that external state.
-  [TransactionState.Failed]: [],
+  [TransactionState.Failed]: [
+    TransactionState.Pending,
+    TransactionState.RollingBack,
+  ],
 };
 
 /** Validates and stores the lifecycle state of one transaction. */

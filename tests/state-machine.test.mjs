@@ -52,38 +52,31 @@ test("successful completion states return to pending", () => {
   assert.equal(stopped.getState(), TransactionState.Pending);
 });
 
-test("commit cleanup can only finish as committed", () => {
-  const stateMachine = new TransactionStateMachine();
-  stateMachine.transitionTo(TransactionState.Initialized);
-  stateMachine.transitionTo(TransactionState.Committing);
-  stateMachine.transitionTo(TransactionState.CommitCleanupFailed);
-
-  assert.equal(stateMachine.canTransitionTo(TransactionState.Committed), true);
-  assert.equal(stateMachine.canTransitionTo(TransactionState.Failed), false);
-  assert.equal(
-    stateMachine.transitionTo(TransactionState.Committed),
-    TransactionState.Committed,
-  );
-});
-
 test("running work can return to initialized before completion", () => {
   const stateMachine = new TransactionStateMachine();
 
   stateMachine.transitionTo(TransactionState.Initialized);
   stateMachine.transitionTo(TransactionState.Running);
+  assert.equal(stateMachine.transitionTo(TransactionState.Running), TransactionState.Running);
   assert.equal(stateMachine.transitionTo(TransactionState.Initialized), TransactionState.Initialized);
 });
 
-test("Failed is terminal because commit persistence may be partial", () => {
+test("Failed can recover to pending or retry rollback", () => {
   const stateMachine = new TransactionStateMachine();
   stateMachine.transitionTo(TransactionState.Failed);
 
-  for (const state of Object.values(TransactionState)) {
-    assert.equal(stateMachine.canTransitionTo(state), false);
-  }
+  assert.equal(stateMachine.canTransitionTo(TransactionState.Pending), true);
+  assert.equal(stateMachine.canTransitionTo(TransactionState.RollingBack), true);
+  assert.equal(stateMachine.canTransitionTo(TransactionState.Committing), false);
+  assert.equal(stateMachine.canTransitionTo(TransactionState.Initialized), false);
 
-  assert.throws(
-    () => stateMachine.transitionTo(TransactionState.RollingBack),
-    /Invalid transaction transition/,
-  );
+  assert.equal(stateMachine.transitionTo(TransactionState.RollingBack), TransactionState.RollingBack);
+});
+
+test("Failed can return to pending", () => {
+  const stateMachine = new TransactionStateMachine();
+
+  stateMachine.transitionTo(TransactionState.Failed);
+
+  assert.equal(stateMachine.transitionTo(TransactionState.Pending), TransactionState.Pending);
 });

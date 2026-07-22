@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CommitError,
   DisabledUpdater,
+  EnabledUpdater,
   RollbackError,
   Transaction,
   TransactionState,
@@ -13,15 +14,17 @@ import {
   TestParticipant,
 } from "./fixtures/TestParticipant.mjs";
 
-test("a commit failure still restores the original updater and detaches the registrar", async () => {
+test("a commit failure leaves the enabled updater installed and keeps the registrar attached", async () => {
   const persistenceError = new Error("persistence failed");
-  const originalUpdater = new RecordingUpdater(() => {
-    throw persistenceError;
+  const originalUpdater = new RecordingUpdater();
+  const participant = new TestParticipant(originalUpdater, {
+    onUpdate() {
+      throw persistenceError;
+    },
   });
-  const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("dirty");
 
@@ -32,17 +35,19 @@ test("a commit failure still restores the original updater and detaches the regi
   });
 
   assert.equal(transaction.getState(), TransactionState.Failed);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionRegistrar, null);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
 });
 
-test("a rollback failure still restores the original updater and detaches the registrar", async () => {
+test("a rollback failure restores the original updater and keeps the registrar attached", async () => {
   const operationRollbackError = new Error("rollback failed");
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("dirty", { rollbackError: operationRollbackError });
 
@@ -54,52 +59,45 @@ test("a rollback failure still restores the original updater and detaches the re
 
   assert.equal(transaction.getState(), TransactionState.Failed);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(participant.transactionRegistrar, null);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
   assert.equal(originalUpdater.calls, 0);
 });
 
-test("commit aggregates persistence and detach failures while restoring the updater", async () => {
+test("commit reports persistence failure while leaving updates enabled", async () => {
   const persistenceError = new Error("persistence failed");
-  const detachError = new Error("detach failed");
-  const originalUpdater = new RecordingUpdater(() => {
-    throw persistenceError;
-  });
+  const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater, {
-    onDetach() {
-      throw detachError;
+    onUpdate() {
+      throw persistenceError;
     },
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("dirty");
 
   await assert.rejects(transaction.commit(), (error) => {
     assert.ok(error instanceof CommitError);
-    assert.ok(error.cause instanceof AggregateError);
-    assert.deepEqual(error.cause.errors, [persistenceError, detachError]);
+    assert.strictEqual(error.cause, persistenceError);
     return true;
   });
 
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
   assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
 });
 
-test("rollback attempts every reversal and aggregates rollback plus detach failures", async () => {
+test("rollback attempts every reversal without detaching participants", async () => {
   const firstRollbackError = new Error("first rollback failed");
   const secondRollbackError = new Error("second rollback failed");
-  const detachError = new Error("detach failed");
   const events = [];
   const originalUpdater = new RecordingUpdater();
-  const participant = new TestParticipant(originalUpdater, {
-    onDetach() {
-      throw detachError;
-    },
-  });
+  const participant = new TestParticipant(originalUpdater);
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("first", {
     events,
@@ -115,7 +113,6 @@ test("rollback attempts every reversal and aggregates rollback plus detach failu
     assert.deepEqual(error.errors, [
       secondRollbackError,
       firstRollbackError,
-      detachError,
     ]);
     return true;
   });
@@ -127,6 +124,8 @@ test("rollback attempts every reversal and aggregates rollback plus detach failu
     "rollback:first",
   ]);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.equal(participant.detachCalls, 0);
 });
 
 test("an attach failure detaches a partial registrar and restores the updater", () => {
@@ -139,7 +138,7 @@ test("an attach failure detaches a partial registrar and restores the updater", 
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   assert.throws(
     () => transaction.start(),
     (error) => error === attachError,
@@ -166,7 +165,7 @@ test("an attach failure aggregates detach cleanup without replacing the updater"
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   assert.throws(() => transaction.start(), (error) => {
     assert.ok(error instanceof AggregateError);
     assert.deepEqual(error.errors, [attachError, detachError]);
@@ -190,7 +189,7 @@ test("a temporary updater installation failure restores and detaches the partici
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   assert.throws(
     () => transaction.start(),
     (error) => error === updaterError,
@@ -203,7 +202,7 @@ test("a temporary updater installation failure restores and detaches the partici
   assert.equal(transaction.getState(), TransactionState.Pending);
 });
 
-test("retryCleanup() resolves a transient cleanup failure without new persistence", async () => {
+test("detach() resolves a transient detach failure without new persistence", async () => {
   const detachError = new Error("detach failed once");
   const originalUpdater = new RecordingUpdater();
   let detachAttempts = 0;
@@ -218,57 +217,42 @@ test("retryCleanup() resolves a transient cleanup failure without new persistenc
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("dirty");
 
-  await assert.rejects(transaction.commit(), (error) => {
-    assert.ok(error instanceof CommitError);
-    assert.strictEqual(error.cause, detachError);
-    return true;
-  });
+  await transaction.commit();
 
-  assert.equal(transaction.getState(), TransactionState.CommitCleanupFailed);
+  assert.equal(transaction.getState(), TransactionState.Pending);
   assert.strictEqual(participant.transactionRegistrar, transaction);
-  assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(originalUpdater.calls, 1);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
   assert.deepEqual(participant.values, ["dirty"]);
 
-  transaction.retryCleanup();
+  assert.throws(
+    () => transaction.detach(),
+    (error) => error === detachError,
+  );
+
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+
+  transaction.detach();
 
   assert.equal(transaction.getState(), TransactionState.Pending);
   assert.equal(detachAttempts, 2);
   assert.equal(participant.transactionRegistrar, null);
   assert.strictEqual(participant.getUpdater(), originalUpdater);
-  assert.equal(originalUpdater.calls, 1);
+  assert.equal(participant.updateCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
   assert.deepEqual(participant.values, ["dirty"]);
 
-  assert.throws(
-    () => transaction.retryCleanup(),
-    /Cannot retry commit cleanup while the transaction is pending/,
-  );
+  transaction.detach();
   assert.equal(detachAttempts, 2);
 });
 
-test("retryCleanup() is rejected before commit and after rollback", async () => {
-  const pending = new Transaction();
-
-  assert.throws(
-    () => pending.retryCleanup(),
-    /Cannot retry commit cleanup while the transaction is pending/,
-  );
-
-  const rolledBack = new Transaction();
-  rolledBack.start();
-  await rolledBack.rollback();
-
-  assert.throws(
-    () => rolledBack.retryCleanup(),
-    /Cannot retry commit cleanup while the transaction is pending/,
-  );
-});
-
-test("rollback cleanup failure is terminal", async () => {
+test("detach failure can retry explicit detach", async () => {
   const detachError = new Error("detach failed once");
   const originalUpdater = new RecordingUpdater();
   let detachAttempts = 0;
@@ -283,26 +267,29 @@ test("rollback cleanup failure is terminal", async () => {
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
+  await participant.append("dirty");
+  await transaction.commit();
 
-  await assert.rejects(transaction.rollback(), (error) => {
-    assert.ok(error instanceof RollbackError);
-    assert.deepEqual(error.errors, [detachError]);
-    return true;
-  });
-
-  assert.equal(transaction.getState(), TransactionState.Failed);
+  assert.equal(transaction.getState(), TransactionState.Pending);
   assert.strictEqual(participant.transactionRegistrar, transaction);
+  assert.ok(participant.getUpdater() instanceof EnabledUpdater);
 
-  await assert.rejects(
-    transaction.rollback(),
-    /Invalid transaction transition from failed to rolling-back/,
+  assert.throws(
+    () => transaction.detach(),
+    (error) => error === detachError,
   );
 
-  assert.equal(detachAttempts, 1);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
   assert.strictEqual(participant.transactionRegistrar, transaction);
-  assert.equal(transaction.getState(), TransactionState.Failed);
+
+  transaction.detach();
+
+  assert.equal(detachAttempts, 2);
+  assert.equal(participant.transactionRegistrar, null);
+  assert.strictEqual(participant.getUpdater(), originalUpdater);
+  assert.equal(transaction.getState(), TransactionState.Pending);
 });
 
 test("a failed rollback cannot replay successful reversals", async () => {
@@ -312,7 +299,7 @@ test("a failed rollback cannot replay successful reversals", async () => {
   let firstRollbackCalls = 0;
   let secondRollbackCalls = 0;
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.perform(
     "first",
@@ -350,12 +337,10 @@ test("a failed rollback cannot replay successful reversals", async () => {
   assert.equal(firstRollbackCalls, 1);
   assert.equal(secondRollbackCalls, 1);
 
-  await assert.rejects(
-    transaction.rollback(),
-    /Invalid transaction transition from failed to rolling-back/,
-  );
+  await transaction.rollback();
 
   assert.deepEqual(participant.values, ["first"]);
   assert.equal(firstRollbackCalls, 1);
   assert.equal(secondRollbackCalls, 1);
+  assert.equal(transaction.getState(), TransactionState.Pending);
 });

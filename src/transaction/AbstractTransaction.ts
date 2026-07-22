@@ -4,7 +4,6 @@ import type { TransactionCommitStrategyInterface } from "../interfaces/Transacti
 import type { TransactionInterface } from "../interfaces/TransactionInterface.js";
 import type { TransactionOperationInterface } from "../interfaces/TransactionOperationInterface.js";
 import type { TransactionParticipantInterface } from "../interfaces/TransactionParticipantInterface.js";
-import type { UpdaterInterface } from "../interfaces/UpdaterInterface.js";
 import { DisabledUpdater } from "../updater/DisabledUpdater.js";
 import { EnabledUpdater } from "../updater/EnabledUpdater.js";
 import type { TransactionParticipantBinding } from "./TransactionParticipantBinding.js";
@@ -19,84 +18,64 @@ export abstract class AbstractTransaction implements TransactionInterface {
   /** Fixed updater for phases where participant autoupdate must remain enabled. */
   protected readonly enabledUpdater = new EnabledUpdater();
 
-  private readonly bindings = new Map<
-    TransactionParticipantInterface,
-    TransactionParticipantBinding
-  >();
+  private readonly bindings = new Map<TransactionParticipantInterface, TransactionParticipantBinding>();
   private readonly operations: TransactionOperationInterface[] = [];
   private readonly stateMachine = new TransactionStateMachine();
 
   /** Creates a transaction using the supplied commit strategy. */
-  protected constructor(
-    private readonly commitStrategy: TransactionCommitStrategyInterface,
-  ) {}
+  protected constructor(private readonly commitStrategy: TransactionCommitStrategyInterface) {}
 
   /** Returns the current lifecycle state. */
   getState(): TransactionState {
     return this.stateMachine.getState();
   }
 
-  /** Starts tracking one or more participants by activating all added bindings. */
-  start(
-    participants?:
-      | TransactionParticipantInterface
-      | readonly TransactionParticipantInterface[],
-  ): void {
-    this.assertPending("start the transaction");
-
+  /** Starts tracking one or more participants by activating all attached bindings. */
+  start(participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[]): void {
     if (participants !== undefined) {
-      const participantList = Array.isArray(participants)
-        ? participants
-        : [participants];
-
-      for (const participant of participantList) {
-        this.add(participant);
-      }
+      this.attach(participants);
     }
 
-    this.stateMachine.transitionTo(TransactionState.Initialized);
+    try {
+      this.stateMachine.transitionTo(TransactionState.Initialized);
+    } catch (error) {
+      //TODO: error in einen Logger als Warning speichern
+    }
 
     for (const binding of this.bindings.values()) {
       this.activateBinding(binding);
     }
   }
 
-  /** Adds a participant without attaching it or replacing its updater. */
-  add(participant: TransactionParticipantInterface): this {
-    this.assertPending("add a participant");
+  /** Registers participants without activating them or replacing their updaters. */
+  attach(participants: TransactionParticipantInterface | readonly TransactionParticipantInterface[]): this {
+    const participantList = Array.isArray(participants) ? participants : [participants];
 
-    const existingBinding = this.bindings.get(participant);
+    for (const participant of participantList) {
+      const existingBinding = this.bindings.get(participant);
 
-    if (existingBinding !== undefined) {
-      return this;
+      if (existingBinding !== undefined) {
+        continue;
+      }
+
+      const binding: TransactionParticipantBinding = {
+        participant,
+        originalUpdater: undefined,
+        transactionUpdater: undefined,
+        updaterRestored: true,
+        detached: true,
+      };
+
+      this.bindings.set(participant, binding);
     }
 
-    const binding: TransactionParticipantBinding = {
-      participant,
-      originalUpdater: undefined,
-      transactionUpdater: undefined,
-      updaterRestored: true,
-      detached: true,
-    };
-
-    this.bindings.set(participant, binding);
-
     return this;
-  }
-
-  /** Creates the temporary updater installed while the transaction is pending. */
-  protected createTransactionUpdater(
-    _participant: TransactionParticipantInterface,
-  ): UpdaterInterface | undefined {
-    return undefined;
   }
 
   /** Attaches one added participant and optionally installs a transaction updater. */
   private activateBinding(binding: TransactionParticipantBinding): void {
     binding.originalUpdater = binding.participant.getUpdater();
-    binding.transactionUpdater = this.createTransactionUpdater(
-      binding.participant,
-    );
+    binding.transactionUpdater = this.disabledUpdater;
 
     try {
       binding.detached = false;
@@ -111,10 +90,7 @@ export abstract class AbstractTransaction implements TransactionInterface {
 
       if (cleanupErrors.length > 0) {
         this.stateMachine.transitionTo(TransactionState.Failed);
-        throw new AggregateError(
-          [error, ...cleanupErrors],
-          "Attaching the transaction participant failed and cleanup was incomplete.",
-        );
+        throw new AggregateError([error, ...cleanupErrors], "Attaching the transaction participant failed and cleanup was incomplete.");
       }
 
       this.stateMachine.transitionTo(TransactionState.Pending);
@@ -124,27 +100,29 @@ export abstract class AbstractTransaction implements TransactionInterface {
 
   /** Registers an already-applied operation in registration order. */
   registerOperation(operation: TransactionOperationInterface): void {
-    this.assertInitialized("register an operation");
     const binding = this.bindings.get(operation.participant);
 
     if (binding === undefined || !this.isBindingActive(binding)) {
-      throw new Error(
-        `Cannot register operation "${operation.name}" for an unknown participant.`,
-      );
+      throw new Error(`Cannot register operation "${operation.name}" for an unknown participant.`);
     }
 
+    this.stateMachine.transitionTo(TransactionState.Running);
     this.operations.push(operation);
   }
 
-  /** Backwards-compatible alias for {@link registerOperation}. */
-  register(operation: TransactionOperationInterface): void {
-    this.registerOperation(operation);
-  }
-
-  /** Restores real updaters, commits, and then detaches participants. */
+  /** Enables updates and commits while keeping participants attached. */
   async submit(): Promise<void> {
     this.stateMachine.transitionTo(TransactionState.Committing);
-    const restoreErrors = this.restoreUpdaters();
+    const restoreErrors: unknown[] = [];
+
+    for (const binding of this.bindings.values()) {
+      try {
+        binding.participant.setUpdater(this.enabledUpdater);
+        binding.updaterRestored = false;
+      } catch (error) {
+        restoreErrors.push(error);
+      }
+    }
 
     if (restoreErrors.length > 0) {
       this.failCommit(restoreErrors, "Transaction submit setup failed.");
@@ -160,17 +138,6 @@ export abstract class AbstractTransaction implements TransactionInterface {
     }
 
     this.operations.length = 0;
-    const cleanupErrors = this.detachParticipants();
-
-    if (cleanupErrors.length > 0) {
-      this.stateMachine.transitionTo(TransactionState.CommitCleanupFailed);
-      throw new CommitError(
-        "Transaction submitted, but cleanup failed.",
-        this.toCause(cleanupErrors, "Transaction submit cleanup failed."),
-      );
-    }
-
-    this.bindings.clear();
     this.stateMachine.transitionTo(TransactionState.Committed);
     this.stateMachine.transitionTo(TransactionState.Pending);
   }
@@ -188,70 +155,48 @@ export abstract class AbstractTransaction implements TransactionInterface {
       }
     }
 
-    errors.push(...this.cleanupParticipants());
+    errors.push(...this.restoreUpdaters());
     this.operations.length = 0;
 
     if (errors.length > 0) {
       this.stateMachine.transitionTo(TransactionState.Failed);
       throw new RollbackError("Transaction rollback failed.", errors);
     }
-
-    this.bindings.clear();
     this.stateMachine.transitionTo(TransactionState.RolledBack);
     this.stateMachine.transitionTo(TransactionState.Pending);
   }
 
-  /** Retains in-memory changes while discarding persistence and undo work. */
+  /** Restores original updaters while discarding persistence and undo work. */
   async stop(): Promise<void> {
     this.stateMachine.transitionTo(TransactionState.Stopping);
-    const errors = this.cleanupParticipants();
+    const errors = this.restoreUpdaters();
     this.operations.length = 0;
 
     if (errors.length > 0) {
       this.stateMachine.transitionTo(TransactionState.Failed);
       throw this.toCause(errors, "Transaction stop cleanup failed.");
     }
-
-    this.bindings.clear();
     this.stateMachine.transitionTo(TransactionState.Stopped);
     this.stateMachine.transitionTo(TransactionState.Pending);
   }
 
-  /** Retries only detach work left after an otherwise successful submit. */
-  retryCleanup(): void {
-    if (this.getState() !== TransactionState.CommitCleanupFailed) {
-      throw new Error(
-        `Cannot retry commit cleanup while the transaction is ${this.getState()}.`,
-      );
+  /** Detaches participants explicitly through the shared binding cleanup path. */
+  detach(
+    participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[],
+  ): void {
+    const errors = this.detachParticipants(participants);
+
+    if (errors.length > 0) {
+      throw this.toCause(errors, "Transaction detach failed.");
     }
-
-    const cleanupErrors = this.detachParticipants();
-
-    if (cleanupErrors.length > 0) {
-      throw new CommitError(
-        "Transaction submitted, but cleanup retry failed.",
-        this.toCause(cleanupErrors, "Transaction submit cleanup retry failed."),
-      );
-    }
-
-    this.bindings.clear();
-    this.stateMachine.transitionTo(TransactionState.Committed);
-    this.stateMachine.transitionTo(TransactionState.Pending);
   }
 
   /** Marks commit failure, performs best-effort cleanup, and throws. */
   private failCommit(initialErrors: readonly unknown[], message: string): never {
-    const errors = [...initialErrors, ...this.cleanupParticipants()];
+    const errors = [...initialErrors];
     this.operations.length = 0;
     this.stateMachine.transitionTo(TransactionState.Failed);
     throw new CommitError(message, this.toCause(errors, message));
-  }
-
-  /** Restores all replaced updaters and then detaches all participants. */
-  private cleanupParticipants(): unknown[] {
-    const errors = this.restoreUpdaters();
-    errors.push(...this.detachParticipants());
-    return errors;
   }
 
   /** Restores every updater that was replaced by the transaction. */
@@ -277,23 +222,21 @@ export abstract class AbstractTransaction implements TransactionInterface {
     return errors;
   }
 
-  /** Detaches all remaining registrars without restoring or persisting again. */
-  private detachParticipants(): unknown[] {
+  /** Cleans selected bindings through the same restore and detach path. */
+  private detachParticipants(
+    participants?: TransactionParticipantInterface | readonly TransactionParticipantInterface[],
+  ): unknown[] {
     const errors: unknown[] = [];
+    const participantSet = participants === undefined
+      ? undefined
+      : new Set(Array.isArray(participants) ? participants : [participants]);
 
     for (const binding of this.bindings.values()) {
-      if (!binding.detached) {
-        try {
-          binding.participant.detachTransaction(this);
-          binding.detached = true;
-        } catch (error) {
-          errors.push(error);
-        }
+      if (participantSet !== undefined && !participantSet.has(binding.participant)) {
+        continue;
       }
 
-      if (binding.detached && binding.updaterRestored) {
-        this.bindings.delete(binding.participant);
-      }
+      errors.push(...this.cleanupBinding(binding));
     }
 
     return errors;
@@ -333,25 +276,7 @@ export abstract class AbstractTransaction implements TransactionInterface {
 
   /** Verifies that a participant has a complete live binding. */
   private isBindingActive(binding: TransactionParticipantBinding): boolean {
-    return !binding.detached
-      && (binding.transactionUpdater === undefined || !binding.updaterRestored);
-  }
-
-  /** Restricts participant collection and start to the waiting state. */
-  private assertPending(action: string): void {
-    if (this.getState() !== TransactionState.Pending) {
-      throw new Error(`Cannot ${action} while the transaction is ${this.getState()}.`);
-    }
-  }
-
-  /** Restricts operation registration and completion to the active state. */
-  private assertInitialized(action: string): void {
-    if (
-      this.getState() !== TransactionState.Initialized
-      && this.getState() !== TransactionState.Running
-    ) {
-      throw new Error(`Cannot ${action} while the transaction is ${this.getState()}.`);
-    }
+    return !binding.detached && (binding.transactionUpdater === undefined || !binding.updaterRestored);
   }
 
   /** Returns a single cause directly and aggregates multiple causes. */

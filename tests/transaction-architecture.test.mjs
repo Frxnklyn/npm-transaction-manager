@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  EnabledUpdater,
   PerOperationTransactionCommitStrategy,
   PerParticipantTransactionCommitStrategy,
   Transaction,
@@ -25,6 +26,8 @@ test("start() activates one participant or an array in the default pending state
   assert.strictEqual(first.transactionRegistrar, singleTransaction);
   assert.equal(singleTransaction.getState(), TransactionState.Initialized);
   await singleTransaction.stop();
+  assert.strictEqual(first.transactionRegistrar, singleTransaction);
+  singleTransaction.detach();
 
   arrayTransaction.start([first, second]);
   assert.strictEqual(first.transactionRegistrar, arrayTransaction);
@@ -47,7 +50,7 @@ test("operation registration is rejected until attach and updater setup complete
   });
   const transaction = new Transaction();
 
-  transaction.add(participant);
+  transaction.attach(participant);
   assert.throws(
     () => transaction.start(),
     /unknown participant/,
@@ -71,16 +74,26 @@ test("per-participant commit updates each participant exactly once", async () =>
   await second.append("three");
   await transaction.submit();
 
-  assert.equal(firstUpdater.calls, 1);
-  assert.equal(secondUpdater.calls, 1);
+  assert.equal(first.updateCalls, 1);
+  assert.equal(second.updateCalls, 1);
+  assert.equal(firstUpdater.calls, 0);
+  assert.equal(secondUpdater.calls, 0);
 });
 
 test("per-operation commit follows registration order and never replays changes", async () => {
   const events = [];
-  const firstUpdater = new RecordingUpdater(() => events.push("update:first"));
-  const secondUpdater = new RecordingUpdater(() => events.push("update:second"));
-  const first = new TestParticipant(firstUpdater);
-  const second = new TestParticipant(secondUpdater);
+  const firstUpdater = new RecordingUpdater();
+  const secondUpdater = new RecordingUpdater();
+  const first = new TestParticipant(firstUpdater, {
+    onUpdate() {
+      events.push("update:first");
+    },
+  });
+  const second = new TestParticipant(secondUpdater, {
+    onUpdate() {
+      events.push("update:second");
+    },
+  });
   const transaction = new Transaction(
     new PerOperationTransactionCommitStrategy(),
   );
@@ -96,7 +109,7 @@ test("per-operation commit follows registration order and never replays changes"
   assert.deepEqual(second.values, ["three"]);
 });
 
-test("commit strategy receives frozen snapshots after original updaters are restored", async () => {
+test("commit strategy receives frozen snapshots after participants are enabled", async () => {
   const originalUpdater = new RecordingUpdater();
   const participant = new TestParticipant(originalUpdater);
   let commitCalls = 0;
@@ -106,19 +119,20 @@ test("commit strategy receives frozen snapshots after original updaters are rest
       assert.equal(Object.isFrozen(participants), true);
       assert.equal(Object.isFrozen(operations), true);
       assert.strictEqual(participants[0], participant);
-      assert.strictEqual(participant.getUpdater(), originalUpdater);
+      assert.ok(participant.getUpdater() instanceof EnabledUpdater);
       assert.throws(() => participants.push(participant), TypeError);
       assert.throws(() => operations.pop(), TypeError);
     },
   };
   const transaction = new Transaction(strategy);
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("tracked");
   await transaction.submit();
 
   assert.equal(commitCalls, 1);
+  assert.equal(originalUpdater.calls, 0);
 });
 
 test("rollback never invokes the commit strategy", async () => {
@@ -130,7 +144,7 @@ test("rollback never invokes the commit strategy", async () => {
   });
   const participant = new TestParticipant(new RecordingUpdater());
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.append("temporary");
   await transaction.rollback();
@@ -150,7 +164,7 @@ test("stop retains memory state without persistence or rollback", async () => {
     },
   });
 
-  transaction.add(participant);
+  transaction.attach(participant);
   transaction.start();
   await participant.perform(
     "retain",
@@ -168,6 +182,9 @@ test("stop retains memory state without persistence or rollback", async () => {
   assert.equal(updater.calls, 0);
   assert.deepEqual(participant.values, ["retained"]);
   assert.strictEqual(participant.getUpdater(), updater);
+  assert.strictEqual(participant.transactionRegistrar, transaction);
+
+  transaction.detach();
   assert.equal(participant.transactionRegistrar, null);
 });
 
